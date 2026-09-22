@@ -27,9 +27,9 @@ class SetupUI:
 
         self.root = tk.Tk()
         self.root.title("Ghost-AI — Setup")
-        self.root.geometry("620x900")
-        self.root.minsize(620, 900)
-        self.root.resizable(False, False)
+        self.root.geometry("680x900")
+        self.root.minsize(640, 700)
+        self.root.resizable(True, True)
         self.root.configure(bg="#1e1e1e")
 
         self._build_ui()
