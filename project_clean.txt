@@ -1,0 +1,2914 @@
+
+==================================================
+FILE: .\activation_ui.py
+==================================================
+"""
+activation_ui.py — окно активации лицензии.
+"""
+import logging
+import tkinter as tk
+from tkinter import messagebox
+from typing import Optional, Callable
+
+from license_manager import (
+    verify_key, save_license, load_license,
+    format_license_info, LicenseData,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class ActivationUI:
+    def __init__(self, on_activated: Callable[[LicenseData], None]):
+        self.on_activated = on_activated
+        self.activated: Optional[LicenseData] = None
+
+        self.root = tk.Tk()
+        self.root.title("Ghost AI — Активация")
+        self.root.geometry("520x340")
+        self.root.resizable(False, False)
+        self.root.configure(bg="#1e1e1e")
+        self.root.attributes("-topmost", True)
+
+        self._build_ui()
+
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.root.mainloop()
+
+    def _build_ui(self) -> None:
+        tk.Label(
+            self.root, text="👻 Ghost AI",
+            font=("Segoe UI", 24, "bold"),
+            bg="#1e1e1e", fg="#00d4ff",
+        ).pack(pady=(30, 5))
+
+        tk.Label(
+            self.root,
+            text="Введите лицензионный ключ\n"
+                 "(получен в @your_bot после оплаты)",
+            font=("Segoe UI", 10),
+            bg="#1e1e1e", fg="#888888",
+            justify="center",
+        ).pack(pady=(0, 20))
+
+        # Поле ввода — длинное, т.к. формат base64.hex
+        self.key_var = tk.StringVar()
+        entry = tk.Entry(
+            self.root, textvariable=self.key_var,
+            font=("Consolas", 11),
+            bg="#2a2a2a", fg="#ffffff",
+            insertbackground="#ffffff",
+            relief="flat", bd=5,
+        )
+        entry.pack(fill="x", padx=40, ipady=8)
+        entry.focus_set()
+
+        tk.Label(
+            self.root,
+            text="Формат: <base64>.<hmac_hex>",
+            font=("Segoe UI", 8),
+            bg="#1e1e1e", fg="#555555",
+        ).pack(pady=(5, 20))
+
+        btn_frame = tk.Frame(self.root, bg="#1e1e1e")
+        btn_frame.pack(pady=10)
+
+        tk.Button(
+            btn_frame, text="✓ Активировать",
+            font=("Segoe UI", 11, "bold"),
+            bg="#00d4ff", fg="#000000",
+            activebackground="#00b8e6",
+            relief="flat", padx=25, pady=8,
+            cursor="hand2",
+            command=self._on_activate,
+        ).pack(side="left", padx=5)
+
+        tk.Button(
+            btn_frame, text="💫 Купить в Telegram",
+            font=("Segoe UI", 10),
+            bg="#2a2a2a", fg="#ffffff",
+            activebackground="#3a3a3a",
+            relief="flat", padx=20, pady=8,
+            cursor="hand2",
+            command=self._on_buy,
+        ).pack(side="left", padx=5)
+
+        # Статус
+        self.status_var = tk.StringVar(value="")
+        tk.Label(
+            self.root, textvariable=self.status_var,
+            font=("Segoe UI", 9),
+            bg="#1e1e1e", fg="#ff5555",
+            wraplength=460,
+        ).pack(pady=(15, 0))
+
+        entry.bind("<Return>", lambda e: self._on_activate())
+
+    def _on_activate(self) -> None:
+        key = self.key_var.get().strip()
+        if not key:
+            self.status_var.set("⚠️ Введите ключ")
+            return
+
+        data = verify_key(key)
+        if data is None:
+            self.status_var.set(
+                "❌ Невалидный ключ.\n"
+                "Проверьте правильность ввода или купите новый."
+            )
+            return
+
+        if data.is_expired:
+            self.status_var.set(
+                f"❌ Срок лицензии истёк ({data.expires_str}).\n"
+                "Купите новую через @your_bot"
+            )
+            return
+
+        if not save_license(key):
+            self.status_var.set(
+                "❌ Не удалось сохранить лицензию.\n"
+                "Запустите от имени администратора."
+            )
+            return
+
+        self.activated = data
+        logger.info("Лицензия активирована: tg_id=%s", data.telegram_id)
+
+        self.root.destroy()
+        try:
+            self.on_activated(data)
+        except Exception as e:
+            logger.error("Ошибка в on_activated: %s", e)
+
+    def _on_buy(self) -> None:
+        import webbrowser
+        # Замените на свой username бота
+        webbrowser.open("https://t.me/your_bot")
+
+    def _on_close(self) -> None:
+        self.root.destroy()
+        raise SystemExit(0)
+
+==================================================
+FILE: .\build.py
+==================================================
+"""
+build.py — сборка Ghost AI через Nuitka.
+
+Использование:
+    pip install nuitka orderedset zstandard
+    python build.py
+"""
+import os
+import sys
+import shutil
+import subprocess
+
+
+APP_NAME = "GhostAI"
+MAIN_SCRIPT = "ghost.py"
+OUTPUT_DIR = "dist"
+ICON_FILE = "icon.ico"
+
+
+def check_requirements():
+    """Проверить установленные зависимости."""
+    print("[1/5] Проверка зависимостей...")
+    required = ["nuitka", "orderedset", "zstandard"]
+    missing = []
+    for pkg in required:
+        try:
+            __import__(pkg)
+        except ImportError:
+            missing.append(pkg)
+
+    if missing:
+        print(f"  ✗ Не установлены: {', '.join(missing)}")
+        print(f"  Установите: pip install {' '.join(missing)}")
+        sys.exit(1)
+    print("  ✓ Зависимости в порядке")
+
+
+def clean_old_builds():
+    """Очистить предыдущие сборки."""
+    print("[2/5] Очистка старых сборок...")
+    paths_to_remove = [
+        f"{APP_NAME}.build",
+        f"{APP_NAME}.dist",
+        f"{APP_NAME}.onefile-build",
+        f"{APP_NAME}.exe",
+        OUTPUT_DIR,
+    ]
+    for path in paths_to_remove:
+        if os.path.exists(path):
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+            print(f"  ✓ Удалён {path}")
+
+
+def build_nuitka():
+    """Запустить Nuitka с защитой кода."""
+    print("[3/5] Сборка через Nuitka...")
+    print("  Это займёт 3-10 минут (компиляция C-кода)")
+
+    icon_arg = f"--windows-icon-from-ico={ICON_FILE}" \
+        if os.path.exists(ICON_FILE) else ""
+
+    cmd = [
+        sys.executable, "-m", "nuitka",
+
+        # === Режим сборки ===
+        "--standalone",                 # всё в одну папку
+        "--onefile",                    # один .exe
+        f"--output-filename={APP_NAME}.exe",
+        f"--output-dir={OUTPUT_DIR}",
+
+        # === Защита кода ===
+        "--enable-plugin=anti-bloat",
+        "--remove-output",
+        "--no-pyi-file",
+        "--python-flag=no_docstrings",
+        "--python-flag=no_asserts",
+        "--python-flag=-O",
+
+        # === Не включать лишнее ===
+        "--nofollow-import-to=tkinter.test",
+        "--nofollow-import-to=unittest",
+        "--nofollow-import-to=pytest",
+        "--nofollow-import-to=test",
+        "--nofollow-import-to=tests",
+        "--nofollow-import-to=pydoc",
+        "--nofollow-import-to=setuptools",
+        "--nofollow-import-to=pkg_resources",
+        "--nofollow-import-to=email",
+        "--nofollow-import-to=html",
+        "--nofollow-import-to=xml",
+        "--nofollow-import-to=http.client",
+
+        # === Включить нужные модули ===
+        "--include-package=ui",
+        "--include-package=setup_ui",
+        "--include-package=capture_area",
+        "--include-package=conversation",
+        "--include-package=config",
+        "--include-package=keybinder",
+        "--include-package=license_manager",
+        "--include-package=activation_ui",
+        "--include-package=guard",
+        "--include-module=requests",
+        "--include-module=PIL",
+        "--include-module=keyboard",
+        "--include-module=pyautogui",
+        "--include-module=cryptography",
+
+        # === Windows-специфичное ===
+        "--windows-disable-console",    # GUI без консоли
+        "--windows-uac-admin",          # права админа для keyboard hook
+
+        # === Метаданные ===
+        "--company-name=GhostAI",
+        "--product-name=Ghost AI",
+        "--file-version=1.0.0",
+        "--product-version=1.0.0",
+        "--file-description=Ghost AI - Smart Desktop Assistant",
+
+        icon_arg,
+        MAIN_SCRIPT,
+    ]
+
+    # Удаляем пустые аргументы
+    cmd = [c for c in cmd if c]
+
+    print(f"  Команда: {' '.join(cmd[:6])}...")
+    print()
+
+    try:
+        result = subprocess.run(cmd, check=False)
+        return result.returncode == 0
+    except KeyboardInterrupt:
+        print("\n[!] Сборка прервана")
+        sys.exit(1)
+
+
+def verify_result():
+    """Проверить что .exe создан."""
+    print("[4/5] Проверка результата...")
+    exe_path = os.path.join(OUTPUT_DIR, f"{APP_NAME}.exe")
+
+    if not os.path.exists(exe_path):
+        print(f"  ✗ Файл не найден: {exe_path}")
+        return False
+
+    size_mb = os.path.getsize(exe_path) / 1024 / 1024
+    print(f"  ✓ Создан: {exe_path}")
+    print(f"  ✓ Размер: {size_mb:.1f} MB")
+
+    if size_mb > 200:
+        print("  ⚠ Файл слишком большой — проверьте неиспользуемые модули")
+
+    return True
+
+
+def copy_dependencies():
+    """Скопировать bot/ и вспомогательные файлы в dist/."""
+    print("[5/5] Копирование дополнительных файлов...")
+    dist = OUTPUT_DIR
+
+    files_to_copy = [
+        ("LICENSE.txt", "Инструкция и лицензия"),
+        ("README.md", "Документация"),
+    ]
+
+    for filename, description in files_to_copy:
+        if os.path.exists(filename):
+            shutil.copy2(filename, os.path.join(dist, filename))
+            print(f"  ✓ {description}: {filename}")
+
+    print()
+    print("=" * 60)
+    print(f"  ✓ СБОРКА ЗАВЕРШЕНА")
+    print(f"  Файл: {os.path.join(OUTPUT_DIR, APP_NAME)}.exe")
+    print("=" * 60)
+    print()
+    print("Следующие шаги:")
+    print(f"  1. Протестируйте: {OUTPUT_DIR}\\{APP_NAME}.exe")
+    print(f"  2. Подпишите через sign.bat (опционально)")
+    print(f"  3. Отправьте на AV-whitelist (см. submit_to_av.py)")
+    print(f"  4. Загрузите на GitHub Releases")
+
+
+def main():
+    print("=" * 60)
+    print(f"  Сборка {APP_NAME}")
+    print("=" * 60)
+    print()
+
+    check_requirements()
+    clean_old_builds()
+
+    if not build_nuitka():
+        print("\n[!] Ошибка сборки Nuitka")
+        sys.exit(1)
+
+    if not verify_result():
+        sys.exit(1)
+
+    copy_dependencies()
+
+
+if __name__ == "__main__":
+    main()
+
+==================================================
+FILE: .\capture_area.py
+==================================================
+"""
+capture_area.py — управление размером UI-окна через клавиши/колесо мыши.
+
+Хранит «дельты» и применяет их к GhostUI во время работы.
+"""
+import logging
+import threading
+from dataclasses import dataclass
+from typing import Dict, Optional
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SizeRect:
+    width: int
+    height: int
+
+    def clamp(self, min_val: int = 100, max_val: int = 4000) -> "SizeRect":
+        return SizeRect(
+            width=max(min_val, min(self.width, max_val)),
+            height=max(min_val, min(self.height, max_val)),
+        )
+
+
+class CaptureAreaController:
+    """
+    Хранит текущий размер UI-окна. GhostUI подписывается через
+    set_resize_callback() и применяет новый размер при изменениях.
+    """
+
+    DEFAULT_W = 350
+    DEFAULT_H = 200
+
+    def __init__(self, base_offset: int = 50, step: int = 25):
+        self._step = step
+        self._rect = SizeRect(
+            width=self.DEFAULT_W + base_offset,
+            height=self.DEFAULT_H + base_offset,
+        )
+        self._lock = threading.Lock()
+        self._handles: Dict[str, object] = {}
+        self._resize_callback = None
+
+    def set_resize_callback(self, callback) -> None:
+        """Регистрация callback(width, height) — вызывается при изменении."""
+        self._resize_callback = callback
+
+    def get(self) -> SizeRect:
+        with self._lock:
+            return SizeRect(self._rect.width, self._rect.height)
+
+    def reset(self) -> None:
+        self.set(self.DEFAULT_W, self.DEFAULT_H)
+
+    def _modify(self, d_w: int = 0, d_h: int = 0) -> None:
+        with self._lock:
+            self._rect = SizeRect(
+                self._rect.width + d_w,
+                self._rect.height + d_h,
+            ).clamp()
+            r = self._rect
+        logger.info("UI-окно: %dx%d", r.width, r.height)
+        if self._resize_callback:
+            try:
+                self._resize_callback(r.width, r.height)
+            except Exception as e:
+                logger.error("resize_callback error: %s", e)
+
+    def set(self, width: int, height: int) -> None:
+        with self._lock:
+            self._rect = SizeRect(width, height).clamp()
+            r = self._rect
+        logger.info("UI-окно: %dx%d", r.width, r.height)
+        if self._resize_callback:
+            try:
+                self._resize_callback(r.width, r.height)
+            except Exception as e:
+                logger.error("resize_callback error: %s", e)
+
+    # ---------- Действия ----------
+    def expand_right(self)  -> None: self._modify(d_w=+self._step)
+    def shrink_left(self)   -> None: self._modify(d_w=-self._step)
+    def expand_down(self)   -> None: self._modify(d_h=+self._step)
+    def shrink_up(self)     -> None: self._modify(d_h=-self._step)
+    def expand_all(self)    -> None: self._modify(d_w=+self._step, d_h=+self._step)
+    def shrink_all(self)    -> None: self._modify(d_w=-self._step, d_h=-self._step)
+    def reset_capture(self) -> None: self.reset()
+
+    # ---------- Регистрация хоткеев ----------
+    def bind_all(self, keymap: Dict[str, str]) -> None:
+        import keyboard
+        actions = {
+            "expand_right":  self.expand_right,
+            "shrink_left":   self.shrink_left,
+            "expand_down":   self.expand_down,
+            "shrink_up":     self.shrink_up,
+            "expand_all":    self.expand_all,
+            "shrink_all":    self.shrink_all,
+            "reset_capture": self.reset_capture,
+        }
+        self.unbind_all()
+        for action, method in actions.items():
+            key = keymap.get(action, "").strip().lower()
+            if not key:
+                continue
+            try:
+                self._handles[action] = keyboard.add_hotkey(key, method)
+                logger.info("UI size: %-15s → %s", action, key)
+            except (ValueError, KeyError) as e:
+                logger.error("Невалидный хоткей '%s' для '%s': %s",
+                             key, action, e)
+
+    def unbind_all(self) -> None:
+        import keyboard
+        for handle in self._handles.values():
+            try:
+                keyboard.remove_hotkey(handle)
+            except (KeyError, ValueError):
+                pass
+        self._handles.clear()
+
+==================================================
+FILE: .\config.py
+==================================================
+"""
+config.py — сохранение/загрузка настроек.
+"""
+from crypto import encrypt_dict, decrypt_dict
+
+import json
+import os
+import logging
+from dataclasses import dataclass, asdict, field
+from typing import Dict
+
+logger = logging.getLogger(__name__)
+
+CONFIG_PATH = os.path.join(
+    os.path.expanduser("~"),
+    ".ghost_ai_config.json"
+)
+
+
+@dataclass
+class AppConfig:
+    # Backend
+    backend: str = ""
+    ollama_url: str = "http://localhost:11434"
+    ollama_model: str = ""
+    openrouter_api_key: str = ""
+    openrouter_model: str = "llama-4-scout"
+
+    # Системный промпт — задаёт роль и стиль ответа
+    system_prompt: str = (
+        "Только правильный ответ без никаких слов"
+    )
+
+    # Пользовательский промпт — что делать с КАЖДЫМ изображением
+    user_prompt: str = (
+        "Отвечай максимально коротко и без ошибок"
+    )
+
+    # Хоткеи
+    hotkeys: Dict[str, str] = field(default_factory=lambda: {
+        "screenshot":    "esc",
+        "toggle_follow": "right ctrl",
+        "reset":         "ctrl+shift+r",
+    })
+
+    capture_keys: Dict[str, str] = field(default_factory=lambda: {
+        "expand_right":  "right",
+        "shrink_left":   "left",
+        "expand_down":   "down",
+        "shrink_up":     "up",
+        "expand_all":    "mouse wheel up",
+        "shrink_all":    "mouse wheel down",
+        "reset_capture": "ctrl+0",
+    })
+
+    visibility_keys: Dict[str, str] = field(default_factory=lambda: {
+        "increase_alpha":      "ctrl+up",
+        "decrease_alpha":      "ctrl+down",
+        "toggle_clickthrough": "ctrl+shift+c",
+        "toggle_invisible":    "ctrl+shift+h",
+    })
+
+    kill_key: str = "ctrl+shift+q"
+
+    # Контекст
+    max_context_pairs: int = 10
+    persist_context: bool = True
+    include_images_in_context: bool = False
+    reset_context_key: str = "ctrl+shift+x"
+
+    # Прочее
+    alpha_min: float = 0.05
+    alpha_max: float = 1.0
+    alpha_step: float = 0.1
+    alpha_default: float = 0.5
+    screenshot_offset: int = 50
+    capture_step: int = 25
+    request_timeout: int = 30
+    window_alpha: float = 0.5
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "AppConfig":
+        defaults = cls()
+        merged = defaults.to_dict()
+        merged.update(data or {})
+        for dict_field in ("hotkeys", "capture_keys", "visibility_keys"):
+            d = defaults.__dict__[dict_field].copy()
+            d.update(merged.get(dict_field, {}))
+            merged[dict_field] = d
+        return cls(**merged)
+
+    def save(self) -> None:
+        try:
+            plain = self.to_dict()
+            plain["_secrets"] = encrypt_dict({
+            "openrouter_api_key": self.openrouter_api_key,
+            })
+            plain["openrouter_api_key"] = ""
+            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(plain, f, indent=2, ensure_ascii=False)
+        except OSError as e:
+            logger.error("Не удалось сохранить конфиг: %s", e)
+
+    @classmethod
+    def load(cls) -> "AppConfig":
+        if not os.path.exists(CONFIG_PATH):
+            return cls()
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            token = data.get("_secrets", "")
+            if token:
+                secrets = decrypt_dict(token) or {}
+                data["openrouter_api_key"] = secrets.get(
+                "openrouter_api_key", "")
+            data.pop("_secrets", None)
+            return cls.from_dict(data)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("Не удалось загрузить конфиг: %s", e)
+            return cls()
+
+==================================================
+FILE: .\conversation.py
+==================================================
+"""
+conversation.py — управление контекстом диалога.
+
+Хранит пары (изображение + текст вопроса → ответ) в FIFO-очереди
+с ограничением размера. Опционально сохраняется в JSON.
+"""
+import base64
+import io
+import json
+import logging
+import os
+import threading
+from collections import deque
+from dataclasses import dataclass, asdict
+from datetime import datetime
+from typing import Deque, List, Optional
+
+from PIL import Image
+
+logger = logging.getLogger(__name__)
+
+CONTEXT_PATH = os.path.join(
+    os.path.expanduser("~"),
+    ".ghost_ai_context.json"
+)
+
+
+@dataclass
+class Turn:
+    """Один ход диалога: пользователь отправил изображение+вопрос, AI ответил."""
+    timestamp: str
+    user_text: str          # текст промпта
+    user_image_b64: str     # base64 изображения (или пустая строка)
+    assistant_text: str     # ответ AI
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Turn":
+        return cls(
+            timestamp=d.get("timestamp", ""),
+            user_text=d.get("user_text", ""),
+            user_image_b64=d.get("user_image_b64", ""),
+            assistant_text=d.get("assistant_text", ""),
+        )
+
+
+class ConversationMemory:
+    """
+    Потокобезопасная память диалога.
+    Хранит последние N пар (image, prompt, answer).
+    """
+
+    def __init__(self, max_pairs: int = 10, persist: bool = True):
+        self._max_pairs = max(0, max_pairs)
+        self._persist = persist
+        self._lock = threading.Lock()
+        # deque с maxlen автоматически вытесняет старые элементы
+        self._turns: Deque[Turn] = deque(maxlen=self._max_pairs or 1)
+        if self._persist:
+            self._load()
+
+    # ============================================================
+    #  Конфигурация
+    # ============================================================
+
+    def set_limits(self, max_pairs: int, persist: bool) -> None:
+        """Изменить лимит хранения. Сохраняет уже существующие turn'ы."""
+        with self._lock:
+            old = list(self._turns)
+            self._max_pairs = max(0, max_pairs)
+            self._persist = persist
+            self._turns = deque(old, maxlen=self._max_pairs or 1)
+            if self._persist:
+                self._save()
+
+    @property
+    def enabled(self) -> bool:
+        return self._max_pairs > 0
+
+    @property
+    def size(self) -> int:
+        with self._lock:
+            return len(self._turns)
+
+    # ============================================================
+    #  Управление
+    # ============================================================
+
+    def add_turn(self, user_text: str, image: Optional[Image.Image],
+                 assistant_text: str) -> None:
+        """Добавить новый ход в историю."""
+        if not self.enabled:
+            return
+
+        img_b64 = ""
+        if image is not None:
+            img_b64 = self._image_to_b64(image)
+
+        turn = Turn(
+            timestamp=datetime.now().isoformat(timespec="seconds"),
+            user_text=user_text,
+            user_image_b64=img_b64,
+            assistant_text=assistant_text,
+        )
+
+        with self._lock:
+            self._turns.append(turn)
+            if self._persist:
+                self._save()
+
+        logger.info("Контекст: добавлен turn (всего %d/%d)",
+                    len(self._turns), self._max_pairs)
+
+    def clear(self) -> None:
+        """Очистить всю историю."""
+        with self._lock:
+            self._turns.clear()
+            if self._persist:
+                self._save()
+        logger.info("Контекст очищен")
+
+    def get_turns(self, include_images: bool = False) -> List[Turn]:
+        """Вернуть список ходов (копию) для отправки в AI."""
+        with self._lock:
+            turns = list(self._turns)
+
+        if not include_images:
+            # Возвращаем только текст (изображения экономят токены)
+            return [
+                Turn(
+                    timestamp=t.timestamp,
+                    user_text=t.user_text,
+                    user_image_b64="",
+                    assistant_text=t.assistant_text,
+                )
+                for t in turns
+            ]
+        return turns
+
+    # ============================================================
+    #  Сериализация
+    # ============================================================
+
+    @staticmethod
+    def _image_to_b64(image: Image.Image) -> str:
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+        buf = io.BytesIO()
+        image.save(buf, format="JPEG", quality=70)
+        return base64.standard_b64encode(buf.getvalue()).decode("utf-8")
+
+    def _save(self) -> None:
+        try:
+            data = {
+                "max_pairs": self._max_pairs,
+                "turns": [t.to_dict() for t in self._turns],
+            }
+            with open(CONTEXT_PATH, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except OSError as e:
+            logger.error("Не удалось сохранить контекст: %s", e)
+
+    def _load(self) -> None:
+        if not os.path.exists(CONTEXT_PATH):
+            return
+        try:
+            with open(CONTEXT_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            turns = [Turn.from_dict(t) for t in data.get("turns", [])]
+            with self._lock:
+                self._turns = deque(turns, maxlen=self._max_pairs or 1)
+            logger.info("Загружено %d ходов из %s", len(turns), CONTEXT_PATH)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("Не удалось загрузить контекст: %s", e)
+
+==================================================
+FILE: .\crypto.py
+==================================================
+"""
+crypto.py — шифрование конфига через Windows DPAPI.
+"""
+import base64
+import json
+import logging
+import platform
+import hashlib
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+IS_WINDOWS = platform.system() == "Windows"
+
+if IS_WINDOWS:
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _DATA_BLOB(ctypes.Structure):
+            _fields_ = [
+                ("cbData", wintypes.DWORD),
+                ("pbData", ctypes.POINTER(ctypes.c_byte)),
+            ]
+
+        _CryptProtectData = ctypes.windll.crypt32.CryptProtectData
+        _CryptProtectData.argtypes = [
+            ctypes.POINTER(_DATA_BLOB), ctypes.c_wchar_p,
+            ctypes.POINTER(_DATA_BLOB), ctypes.c_void_p,
+            ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(_DATA_BLOB),
+        ]
+        _CryptProtectData.restype = wintypes.BOOL
+
+        _CryptUnprotectData = ctypes.windll.crypt32.CryptUnprotectData
+        _CryptUnprotectData.argtypes = [
+            ctypes.POINTER(_DATA_BLOB), ctypes.c_wchar_p,
+            ctypes.POINTER(_DATA_BLOB), ctypes.c_void_p,
+            ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(_DATA_BLOB),
+        ]
+        _CryptUnprotectData.restype = wintypes.BOOL
+
+        DPAPI_AVAILABLE = True
+    except Exception as e:
+        logger.warning("DPAPI недоступен: %s", e)
+        DPAPI_AVAILABLE = False
+else:
+    DPAPI_AVAILABLE = False
+
+
+def _dpapi_encrypt(data: bytes) -> Optional[bytes]:
+    if not (IS_WINDOWS and DPAPI_AVAILABLE):
+        return None
+    try:
+        inp = _DATA_BLOB(len(data), ctypes.cast(
+            ctypes.c_char_p(data), ctypes.POINTER(ctypes.c_byte)))
+        out = _DATA_BLOB()
+        ok = _CryptProtectData(
+            ctypes.byref(inp), None, None, None, None,
+            0x01, ctypes.byref(out))
+        if not ok:
+            return None
+        buf = ctypes.string_at(out.pbData, out.cbData)
+        ctypes.windll.kernel32.LocalFree(out.pbData)
+        return buf
+    except Exception as e:
+        logger.error("DPAPI encrypt error: %s", e)
+        return None
+
+
+def _dpapi_decrypt(data: bytes) -> Optional[bytes]:
+    if not (IS_WINDOWS and DPAPI_AVAILABLE):
+        return None
+    try:
+        inp = _DATA_BLOB(len(data), ctypes.cast(
+            ctypes.c_char_p(data), ctypes.POINTER(ctypes.c_byte)))
+        out = _DATA_BLOB()
+        ok = _CryptUnprotectData(
+            ctypes.byref(inp), None, None, None, None,
+            0x01, ctypes.byref(out))
+        if not ok:
+            return None
+        buf = ctypes.string_at(out.pbData, out.cbData)
+        ctypes.windll.kernel32.LocalFree(out.pbData)
+        return buf
+    except Exception as e:
+        logger.error("DPAPI decrypt error: %s", e)
+        return None
+
+
+def _machine_key() -> bytes:
+    parts = [platform.node(), platform.machine(), platform.processor()]
+    return hashlib.sha256("|".join(parts).encode("utf-8")).digest()
+
+
+def _xor(data: bytes) -> bytes:
+    key = _machine_key()
+    return bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
+
+
+def encrypt_dict(data: dict) -> str:
+    raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    if IS_WINDOWS and DPAPI_AVAILABLE:
+        enc = _dpapi_encrypt(raw)
+        if enc is not None:
+            return "v1:dpapi:" + base64.b64encode(enc).decode("ascii")
+    enc = _xor(raw)
+    return "v1:xor:" + base64.b64encode(enc).decode("ascii")
+
+
+def decrypt_dict(token: str) -> Optional[dict]:
+    if not token or token.count(":") < 2:
+        return None
+    try:
+        _, method, payload = token.split(":", 2)
+        raw = base64.b64decode(payload)
+    except Exception:
+        return None
+    if method == "dpapi":
+        dec = _dpapi_decrypt(raw)
+    elif method == "xor":
+        dec = _xor(raw)
+    else:
+        return None
+    if dec is None:
+        return None
+    try:
+        return json.loads(dec.decode("utf-8"))
+    except Exception:
+        return None
+
+==================================================
+FILE: .\ghost.py
+==================================================
+"""
+ghost.py — главный модуль Ghost-AI.
+"""
+import logging
+import os
+import sys
+
+def _check_license() -> None:
+    try:
+        from license_manager import load_license, LicenseData
+        from activation_ui import ActivationUI
+
+        data = load_license()
+        if data and not data.is_expired:
+            return
+
+        # Лицензии нет — показать окно
+        holder = []
+        ui = ActivationUI(on_activated=lambda d: holder.append(d))
+        if not holder:
+            sys.exit(0)
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f"Ошибка проверки лицензии: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+_check_license()
+
+
+import base64
+import io
+import logging
+import os
+import threading
+from typing import Optional
+
+import keyboard
+import pyautogui
+import requests
+from PIL import Image
+
+from config import AppConfig
+from conversation import ConversationMemory
+from keybinder import KeyBinder
+from setup_ui import SetupUI
+from ui import GhostUI, WindowState
+from capture_area import CaptureAreaController
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+)
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+#  Vision-клиент (с поддержкой контекста)
+# ============================================================
+class VisionClient:
+    def __init__(self, config: AppConfig, memory: ConversationMemory):
+        self.config = config
+        self.memory = memory
+
+    def analyze(self, image: Image.Image) -> str:
+        """
+        Анализ изображения. Использует ТОЛЬКО промпты из конфига:
+          - system_prompt — задаёт стиль
+          - user_prompt   — что делать с изображением
+        Никаких вшитых инструкций.
+        """
+        user_prompt = (self.config.user_prompt or "").strip()
+
+        if self.config.backend == "ollama":
+            answer = self._analyze_ollama(image, user_prompt)
+        elif self.config.backend == "openrouter":
+            answer = self._analyze_openrouter(image, user_prompt)
+        else:
+            raise RuntimeError(f"Неизвестный backend: {self.config.backend!r}")
+
+        self.memory.add_turn(user_prompt, image, answer)
+        return answer
+
+    # ---------- Ollama ----------
+    def _analyze_ollama(self, image: Image.Image, prompt: str) -> str:
+        url = f"{self.config.ollama_url.rstrip('/')}/api/generate"
+        img_b64 = self._image_to_base64(image)
+        full_prompt = self._build_user_prompt(prompt)
+
+        payload = {
+            "model": self.config.ollama_model,
+            "prompt": full_prompt,
+            "images": [img_b64],
+            "stream": False,
+        }
+
+        try:
+            r = requests.post(url, json=payload,
+                              timeout=self.config.request_timeout)
+        except requests.exceptions.ConnectionError as e:
+            raise ConnectionError("Ollama недоступна") from e
+        except requests.exceptions.Timeout as e:
+            raise TimeoutError("Ollama timeout") from e
+
+        if r.status_code != 200:
+            raise RuntimeError(f"Ollama HTTP {r.status_code}: {r.text[:200]}")
+
+        answer = (r.json().get("response") or "").strip()
+        if not answer:
+            raise RuntimeError("Ollama: пустой ответ")
+        return answer
+
+    # ---------- OpenRouter ----------
+    def _analyze_openrouter(self, image: Image.Image, prompt: str) -> str:
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        img_b64 = self._image_to_base64(image)
+        headers = {
+            "Authorization": f"Bearer {self.config.openrouter_api_key}",
+            "Content-Type": "application/json",
+        }
+
+        messages = []
+
+        # Системный промпт — задаёт роль и стиль
+        sp = (self.config.system_prompt or "").strip()
+        if sp:
+            messages.append({"role": "system", "content": sp})
+
+        # История диалога
+        if self.memory.enabled:
+            turns = self.memory.get_turns(
+                include_images=self.config.include_images_in_context
+            )
+            for t in turns:
+                messages.append({"role": "user", "content": t.user_text})
+                messages.append({"role": "assistant",
+                                 "content": t.assistant_text})
+
+        # Текущий запрос: текст + изображение
+        messages.append({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url",
+                 "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+            ],
+        })
+
+        payload = {
+            "model": self.config.openrouter_model,
+            "messages": messages,
+            "max_tokens": 500,
+        }
+
+        try:
+            r = requests.post(url, json=payload, headers=headers,
+                              timeout=self.config.request_timeout)
+        except requests.exceptions.ConnectionError as e:
+            raise ConnectionError("OpenRouter недоступен") from e
+        except requests.exceptions.Timeout as e:
+            raise TimeoutError("OpenRouter timeout") from e
+
+        if r.status_code != 200:
+            raise RuntimeError(
+                f"OpenRouter HTTP {r.status_code}: {r.text[:200]}"
+            )
+
+        data = r.json()
+        try:
+            answer = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as e:
+            raise RuntimeError(f"OpenRouter: неожиданный формат: {e}")
+
+        if isinstance(answer, list):
+            answer = " ".join(
+                p.get("text", "") for p in answer
+                if isinstance(p, dict) and p.get("type") == "text"
+            )
+        answer = (answer or "").strip()
+        if not answer:
+            raise RuntimeError("OpenRouter: пустой ответ")
+        return answer
+
+    # ---------- Хелперы ----------
+    def _build_user_prompt(self, prompt: str) -> str:
+        """
+        Ollama: вшить системный промпт + историю в текст.
+        """
+        sp = (self.config.system_prompt or "").strip()
+
+        history_text = ""
+        if self.memory.enabled:
+            turns = self.memory.get_turns(include_images=False)
+            if turns:
+                history_text = "\n\nПРЕДЫДУЩИЙ ДИАЛОГ:\n"
+                for i, t in enumerate(turns, 1):
+                    history_text += (
+                        f"[{i}] Пользователь: {t.user_text}\n"
+                        f"[{i}] Ассистент: {t.assistant_text}\n"
+                    )
+
+        parts = []
+        if sp:
+            parts.append(sp)
+        if history_text:
+            parts.append(history_text.strip())
+        parts.append(f"ЗАДАНИЕ:\n{prompt}")
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _image_to_base64(image: Image.Image) -> str:
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+        buf = io.BytesIO()
+        image.save(buf, format="JPEG", quality=85)
+        return base64.standard_b64encode(buf.getvalue()).decode("utf-8")
+
+
+# ============================================================
+#  Ассистент
+# ============================================================
+class GhostAssistant:
+    def __init__(self, config: AppConfig):
+        self.config = config
+
+        self.ui = GhostUI(
+            alpha=config.window_alpha,
+            alpha_min=config.alpha_min,
+            alpha_max=config.alpha_max,
+        )
+
+        self.memory = ConversationMemory(
+            max_pairs=config.max_context_pairs,
+            persist=config.persist_context,
+        )
+
+        self.client = VisionClient(config, self.memory)
+        self.binder = KeyBinder()
+        self.capture = CaptureAreaController(
+            base_offset=config.screenshot_offset,
+            step=config.capture_step,
+        )
+        self.capture.set_resize_callback(self.ui.apply_size)
+
+        self._setup_hotkeys()
+        self._start_position_loop()
+
+        ctx_status = (
+            f"{self.memory.size}/{self.config.max_context_pairs} пар"
+            if self.memory.enabled else "выключен"
+        )
+        self.ui.log(f"👻 Готов. Контекст: {ctx_status}")
+
+        logger.info("✓ Приложение запущено")
+        logger.info("  Backend:        %s", config.backend)
+        logger.info("  System prompt:  %.50s…", config.system_prompt)
+        logger.info("  User prompt:    %.50s…", config.user_prompt)
+
+    def _setup_hotkeys(self) -> None:
+        hk = self.config.hotkeys
+        self.binder.register("screenshot",    hk["screenshot"],    self._on_screenshot)
+        self.binder.register("toggle_follow", hk["toggle_follow"], self.ui.toggle_follow)
+        self.binder.register("reset",         hk["reset"],         self._on_reset)
+
+        self.capture.bind_all(self.config.capture_keys)
+        self._bind_visibility()
+        self._bind_context()
+
+    def _bind_visibility(self) -> None:
+        vk = self.config.visibility_keys
+        actions = {
+            "increase_alpha":      lambda: self.ui.adjust_alpha(+self.config.alpha_step),
+            "decrease_alpha":      lambda: self.ui.adjust_alpha(-self.config.alpha_step),
+            "toggle_clickthrough": self.ui.toggle_clickthrough,
+            "toggle_invisible":    self.ui.toggle_invisible,
+        }
+        self._visibility_handles = {}
+        for action, method in actions.items():
+            key = vk.get(action, "").strip().lower()
+            if not key:
+                continue
+            try:
+                self._visibility_handles[action] = keyboard.add_hotkey(
+                    key, method
+                )
+            except (ValueError, KeyError) as e:
+                logger.error("Невалидный visibility_key '%s': %s", key, e)
+
+    def _bind_context(self) -> None:
+        self._context_handle = None
+        self._kill_handle = None
+
+        key = (self.config.reset_context_key or "").strip().lower()
+        if key:
+            try:
+                self._context_handle = keyboard.add_hotkey(
+                    key, self._on_reset_context
+                )
+            except (ValueError, KeyError) as e:
+                logger.error("Невалидный reset_context_key '%s': %s", key, e)
+
+        if self.config.kill_key:
+            try:
+                self._kill_handle = keyboard.add_hotkey(
+                    self.config.kill_key, self._kill_app
+                )
+            except (ValueError, KeyError) as e:
+                logger.error("Невалидный kill_key '%s': %s",
+                             self.config.kill_key, e)
+
+    def _unbind_all_extra(self) -> None:
+        for handle in getattr(self, "_visibility_handles", {}).values():
+            try:
+                keyboard.remove_hotkey(handle)
+            except (KeyError, ValueError):
+                pass
+
+        for handle_attr in ("_context_handle", "_kill_handle"):
+            h = getattr(self, handle_attr, None)
+            if h:
+                try:
+                    keyboard.remove_hotkey(h)
+                except (KeyError, ValueError):
+                    pass
+                setattr(self, handle_attr, None)
+
+    def _on_reset_context(self) -> None:
+        self.memory.clear()
+        self.ui.log("🧹 Контекст очищен")
+
+    def _on_screenshot(self) -> None:
+        if self.ui.is_invisible():
+            return
+        threading.Thread(target=self.process_screen, daemon=True).start()
+
+    def _on_reset(self) -> None:
+        self.capture.reset()
+        self.ui.log("🔄 Размер UI сброшен")
+
+    def _start_position_loop(self) -> None:
+        def tick():
+            try:
+                mx, my = pyautogui.position()
+                self.ui.set_position(mx + 15, my + 15)
+            except Exception as e:
+                logger.debug("position tick: %s", e)
+            self.ui.schedule(tick)
+        tick()
+
+    def process_screen(self) -> None:
+        self.ui.log("Анализирую...")
+        self.ui.set_state(WindowState.PROCESSING)
+        try:
+            x, y, w, h = self.ui.get_geometry()
+            region = (x, y, w + self.config.screenshot_offset,
+                      h + self.config.screenshot_offset)
+            screenshot = pyautogui.screenshot(region=region)
+            logger.info("Скриншот: %s", screenshot.size)
+
+            # analyze() сам возьмёт user_prompt из конфига
+            answer = self.client.analyze(screenshot)
+            logger.info("✓ Ответ: %s...", answer[:50])
+            self.ui.log(answer)
+            self.ui.set_state(WindowState.IDLE)
+
+        except ConnectionError as e:
+            logger.error("%s", e); self.ui.log("[Нет подключения]")
+            self.ui.set_state(WindowState.ERROR)
+        except TimeoutError as e:
+            logger.error("%s", e); self.ui.log("[Timeout]")
+            self.ui.set_state(WindowState.ERROR)
+        except RuntimeError as e:
+            logger.error("API: %s", e); self.ui.log(f"[API: {type(e).__name__}]")
+            self.ui.set_state(WindowState.ERROR)
+        except Exception as e:
+            logger.error("Ошибка: %s", e, exc_info=True)
+            self.ui.log(f"[Ошибка: {type(e).__name__}]")
+            self.ui.set_state(WindowState.ERROR)
+
+    def _kill_app(self) -> None:
+        logger.warning("💀 Kill switch активирован!")
+        try:
+            keyboard.unhook_all()
+        except Exception:
+            pass
+        try:
+            self.ui.destroy()
+        except Exception:
+            pass
+        os._exit(0)
+
+    def run(self) -> None:
+        self.ui.mainloop()
+
+    def shutdown(self) -> None:
+        self.binder.unregister_all()
+        self.capture.unbind_all()
+        self._unbind_all_extra()
+        self.ui.destroy()
+
+
+def main() -> None:
+    logger.info("Запуск Ghost-AI")
+    try:
+        SetupUI(on_complete=_launch_assistant)
+    except SystemExit:
+        return
+    except Exception as e:
+        logger.critical("Ошибка setup: %s", e, exc_info=True)
+
+
+def _launch_assistant(config: AppConfig) -> None:
+    app = GhostAssistant(config)
+    try:
+        app.run()
+    except KeyboardInterrupt:
+        logger.info("Остановлено пользователем")
+    finally:
+        app.shutdown()
+
+
+if __name__ == "__main__":
+    main()
+
+==================================================
+FILE: .\keybinder.py
+==================================================
+"""
+keybinder.py — управление ремаппингом горячих клавиш.
+
+Идея: keyboard.add_hotkey принимает строку (например 'esc', 'right ctrl',
+'ctrl+shift+s'). Храним имена в config.AppConfig.hotkeys (dict).
+При ремаппинге снимаем старый хоткей и ставим новый.
+"""
+import logging
+from typing import Callable, Dict, Optional
+
+import keyboard
+
+logger = logging.getLogger(__name__)
+
+
+class KeyBinder:
+    """
+    Управляет hotkey → callback связками.
+    Устойчив к переустановке (можно перебиндить на лету).
+    """
+
+    def __init__(self):
+        # (action_name) -> current_key_string
+        self._bindings: Dict[str, str] = {}
+        # (action_name) -> callback
+        self._callbacks: Dict[str, Callable[[], None]] = {}
+        # keyboard требует уникальный handle для снятия
+        # (action_name) -> keyboard.add_hotkey handle
+        self._handles: Dict[str, object] = {}
+
+    # ============================================================
+    #  Регистрация
+    # ============================================================
+
+    def register(self, action: str, key: str, callback: Callable[[], None]) -> None:
+        """
+        Зарегистрировать/перебиндить действие.
+        """
+        self.unregister(action)            # снять старый
+        self._bindings[action] = key
+        self._callbacks[action] = callback
+        self._handles[action] = keyboard.add_hotkey(key, callback)
+        logger.info("Hotkey: %-15s → %s", action, key)
+
+    def unregister(self, action: str) -> None:
+        """Снять ремаппинг одного действия."""
+        if action not in self._handles:
+            return
+        try:
+            handle = self._handles.pop(action)
+            keyboard.remove_hotkey(handle)
+        except (KeyError, ValueError) as e:
+            logger.debug("remove_hotkey %s: %s", action, e)
+        self._bindings.pop(action, None)
+        self._callbacks.pop(action, None)
+
+    def unregister_all(self) -> None:
+        for action in list(self._handles.keys()):
+            self.unregister(action)
+
+    # ============================================================
+    #  Ремаппинг (новый ключ → валидация → переустановка)
+    # ============================================================
+
+    def rebind(self, action: str, new_key: str) -> bool:
+        """
+        Перебиндить действие. Возвращает True при успехе.
+        При провале (клавиша уже занята или невалидна) — откат.
+        """
+        new_key = new_key.strip().lower()
+        if not new_key:
+            logger.warning("Пустая клавиша для '%s'", action)
+            return False
+
+        # Проверяем конфликты с другими нашими хоткеями
+        for other_action, other_key in self._bindings.items():
+            if other_action != action and other_key == new_key:
+                logger.warning(
+                    "Конфликт: '%s' уже занят хоткеем '%s'",
+                    new_key, other_action,
+                )
+                return False
+
+        callback = self._callbacks.get(action)
+        if callback is None:
+            logger.warning("Нет callback для '%s'", action)
+            return False
+
+        old_key = self._bindings.get(action)
+
+        try:
+            self.register(action, new_key, callback)
+            return True
+        except (ValueError, KeyError) as e:
+            logger.error("Невалидная клавиша '%s': %s", new_key, e)
+            # Откат
+            if old_key:
+                try:
+                    self.register(action, old_key, callback)
+                except Exception:
+                    pass
+            return False
+
+    def get_key(self, action: str) -> Optional[str]:
+        return self._bindings.get(action)
+
+    def all_bindings(self) -> Dict[str, str]:
+        return dict(self._bindings)
+
+==================================================
+FILE: .\license_manager.py
+==================================================
+"""
+license_manager.py — проверка лицензий в приложении.
+
+Содержит обфусцированный секрет. Расшифровка происходит
+только при правильном build marker (задаётся при сборке).
+"""
+import base64
+import hashlib
+import hmac
+import json
+import logging
+import os
+import platform
+import subprocess
+import time
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+IS_WINDOWS = platform.system() == "Windows"
+
+# ============================================================
+#  ОБФУСЦИРОВАННЫЙ LICENSE_SECRET (НЕ РЕДАКТИРОВАТЬ!)
+#  Замените этот блок на сгенерированный obfuscate_tool.py
+# ============================================================
+# ============================================================
+#  ОБФУСЦИРОВАННЫЙ LICENSE_SECRET
+#  Не редактировать вручную! Сгенерировано obfuscate_tool.py
+# ============================================================
+import secrets as _secrets_lib
+
+_KEY_HASH = "f3d77924997275d9"
+_MARKER = "ghost_ai_default_build_marker_2024"
+
+# Фейковые переменные (мусор для анализаторов)
+_DECOY_A = "eb032f7ec501b8d556d2e86265327ef061175bbe6369538acdaf4d01b3f25a1466eeb342508a1490d5ab501ae69b723a"
+_DECOY_B = "9a2b8a5cede0a4c0514ba9ab11213cc817fcfe5ab31a29f731d836d691ae8a7b"
+
+def _unobf_v1() -> bytes:
+    """Восстанавливает ключ раскрытия через двойной SHA256 маркера."""
+    _h = hashlib.sha256(_MARKER.encode("utf-8")).digest()
+    return hashlib.sha256(_h).digest()
+
+def _unobf_v2(seed: bytes) -> bytes:
+    """Применяет ключ к обфусцированным данным."""
+    _raw = bytes.fromhex(_APP_OBF_HEX)
+    return bytes(b ^ seed[i % len(seed)] for i, b in enumerate(_raw))
+
+def _check_marker(key: bytes) -> bool:
+    return hashlib.sha256(key).hexdigest()[:16] == _KEY_HASH
+
+_APP_OBF_HEX = "bf33b4113b6110ccc4b2d3c01eb6460096376972809bcc980d354c473dc5f54c"
+
+def _get_license_secret() -> bytes:
+    """Получить оригинальный LICENSE_SECRET (32 байта)."""
+    _k = _unobf_v1()
+    if not _check_marker(_k):
+        return _secrets_lib.token_bytes(32)
+    return _unobf_v2(_k)
+
+
+# ============================================================
+
+
+LICENSE_FILE = Path(os.path.expanduser("~")) / ".ghost_ai_license.json"
+
+
+# ============================================================
+#  HWID — привязка к устройству
+# ============================================================
+
+def get_hwid() -> str:
+    """Уникальный ID устройства."""
+    if IS_WINDOWS:
+        try:
+            out = subprocess.check_output(
+                ["wmic", "csproduct", "get", "UUID", "/value"],
+                timeout=5, creationflags=0x08000000,
+            ).decode(errors="ignore")
+            for line in out.splitlines():
+                if "UUID" in line and "=" in line:
+                    val = line.split("=", 1)[1].strip()
+                    if val and val != "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF":
+                        return val
+        except Exception:
+            pass
+
+        try:
+            out = subprocess.check_output(
+                ["wmic", "diskdrive", "where", "Index=0",
+                 "get", "SerialNumber", "/value"],
+                timeout=5, creationflags=0x08000000,
+            ).decode(errors="ignore")
+            for line in out.splitlines():
+                if "SerialNumber" in line and "=" in line:
+                    val = line.split("=", 1)[1].strip()
+                    if val:
+                        return val
+        except Exception:
+            pass
+
+    return f"{platform.node()}-{uuid.getnode():012x}"
+
+
+def get_hwid_hash() -> str:
+    return hashlib.sha256(get_hwid().encode("utf-8")).hexdigest()
+
+
+# ============================================================
+#  Лицензия
+# ============================================================
+
+@dataclass
+class LicenseData:
+    telegram_id: int
+    expires_at: int
+    hwid_hash: str = ""
+
+    @property
+    def is_expired(self) -> bool:
+        return time.time() > self.expires_at
+
+    @property
+    def days_left(self) -> int:
+        return max(0, int((self.expires_at - time.time()) // 86400))
+
+    @property
+    def expires_str(self) -> str:
+        return time.strftime("%Y-%m-%d %H:%M", time.localtime(self.expires_at))
+
+
+# ============================================================
+#  Проверка ключа (формат как в bot/license.py)
+# ============================================================
+
+def verify_key(key: str) -> Optional[LicenseData]:
+    """Проверить ключ формата payload_b64.hmac_hex."""
+    if not key or "." not in key:
+        return None
+
+    try:
+        payload_b64, sig = key.rsplit(".", 1)
+    except ValueError:
+        return None
+
+    # Получаем секрет (расшифровываем на лету)
+    secret = _get_license_secret()
+
+    expected = hmac.new(
+        secret, payload_b64.encode(), hashlib.sha256
+    ).hexdigest()
+
+    if not hmac.compare_digest(sig, expected):
+        return None
+
+    # Декодирование payload
+    try:
+        padded = payload_b64 + "=" * ((4 - len(payload_b64) % 4) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode())
+    except Exception:
+        return None
+
+    uid = payload.get("uid")
+    exp = payload.get("exp")
+    if not isinstance(uid, int) or not isinstance(exp, (int, float)):
+        return None
+
+    return LicenseData(
+        telegram_id=uid,
+        expires_at=int(exp),
+        hwid_hash=get_hwid_hash(),
+    )
+
+
+# ============================================================
+#  Сохранение лицензии
+# ============================================================
+
+def save_license(key: str) -> bool:
+    """Сохранить ключ с привязкой к HWID."""
+    data = verify_key(key)
+    if data is None:
+        return False
+
+    payload = json.dumps({
+        "uid": data.telegram_id,
+        "exp": data.expires_at,
+        "hwid": data.hwid_hash,
+    }).encode("utf-8")
+
+    hwid_key = bytes.fromhex(data.hwid_hash)
+    encrypted = bytes(b ^ hwid_key[i % len(hwid_key)]
+                      for i, b in enumerate(payload))
+
+    try:
+        LICENSE_FILE.write_bytes(encrypted)
+        LICENSE_FILE.chmod(0o600)
+        return True
+    except OSError as e:
+        logger.error("Не удалось сохранить лицензию: %s", e)
+        return False
+
+
+def load_license() -> Optional[LicenseData]:
+    """Загрузить и проверить сохранённую лицензию."""
+    if not LICENSE_FILE.exists():
+        return None
+
+    try:
+        encrypted = LICENSE_FILE.read_bytes()
+    except OSError as e:
+        logger.error("Не удалось прочитать лицензию: %s", e)
+        return None
+
+    hwid_hash = get_hwid_hash()
+    hwid_key = bytes.fromhex(hwid_hash)
+
+    try:
+        decrypted = bytes(b ^ hwid_key[i % len(hwid_key)]
+                          for i, b in enumerate(encrypted))
+        payload = json.loads(decrypted.decode("utf-8"))
+    except Exception:
+        return None
+
+    data = LicenseData(
+        telegram_id=payload.get("uid", 0),
+        expires_at=payload.get("exp", 0),
+        hwid_hash=hwid_hash,
+    )
+
+    if data.is_expired:
+        return None
+
+    return data
+
+
+def clear_license() -> None:
+    try:
+        if LICENSE_FILE.exists():
+            LICENSE_FILE.unlink()
+    except OSError:
+        pass
+
+
+def format_license_info(data: LicenseData) -> str:
+    return (
+        f"👻 Лицензия активна\n"
+        f"Telegram ID: {data.telegram_id}\n"
+        f"Действует до: {data.expires_str}\n"
+        f"Осталось дней: {data.days_left}"
+    )
+
+==================================================
+FILE: .\obfuscate_tool.py
+==================================================
+"""
+obfuscate_tool.py — утилита для обфускации LICENSE_SECRET.
+"""
+import secrets
+import hashlib
+import os
+import sys
+
+
+def get_machine_specific_key() -> bytes:
+    marker = os.environ.get(
+        "GHOST_BUILD_MARKER",
+        "ghost_ai_default_build_marker_2024"
+    ).encode("utf-8")
+    return hashlib.sha256(
+        hashlib.sha256(marker).digest()
+    ).digest()
+
+
+def xor_obfuscate(secret: bytes, key: bytes) -> str:
+    result = bytes(s ^ key[i % len(key)] for i, s in enumerate(secret))
+    return result.hex()
+
+
+def generate_obfuscated_block(secret: bytes, var_name: str) -> str:
+    key = get_machine_specific_key()
+    key_hash = hashlib.sha256(key).hexdigest()[:16]
+    obf_hex = xor_obfuscate(secret, key)
+
+    decoy1 = secrets.token_bytes(48).hex()
+    decoy2 = secrets.token_bytes(32).hex()
+    marker = os.environ.get('GHOST_BUILD_MARKER', 'ghost_ai_default_build_marker_2024')
+
+    code = f'''
+# ============================================================
+#  ОБФУСЦИРОВАННЫЙ LICENSE_SECRET
+#  Не редактировать вручную! Сгенерировано obfuscate_tool.py
+# ============================================================
+import secrets as _secrets_lib
+
+_KEY_HASH = "{key_hash}"
+_MARKER = "{marker}"
+
+# Фейковые переменные (мусор для анализаторов)
+_DECOY_A = "{decoy1}"
+_DECOY_B = "{decoy2}"
+
+def _unobf_v1() -> bytes:
+    """Восстанавливает ключ раскрытия через двойной SHA256 маркера."""
+    _h = hashlib.sha256(_MARKER.encode("utf-8")).digest()
+    return hashlib.sha256(_h).digest()
+
+def _unobf_v2(seed: bytes) -> bytes:
+    """Применяет ключ к обфусцированным данным."""
+    _raw = bytes.fromhex({var_name})
+    return bytes(b ^ seed[i % len(seed)] for i, b in enumerate(_raw))
+
+def _check_marker(key: bytes) -> bool:
+    return hashlib.sha256(key).hexdigest()[:16] == _KEY_HASH
+
+{var_name} = "{obf_hex}"
+
+def _get_license_secret() -> bytes:
+    """Получить оригинальный LICENSE_SECRET (32 байта)."""
+    _k = _unobf_v1()
+    if not _check_marker(_k):
+        return _secrets_lib.token_bytes(32)
+    return _unobf_v2(_k)
+'''
+    return code
+
+
+def main():
+    print("=" * 60)
+    print("  Утилита обфускации LICENSE_SECRET")
+    print("=" * 60)
+    print()
+
+    if len(sys.argv) > 1:
+        secret_hex = sys.argv[1]
+        try:
+            secret = bytes.fromhex(secret_hex)
+        except ValueError:
+            print(f"Ошибка: '{secret_hex}' — не hex-строка")
+            sys.exit(1)
+    else:
+        secret = secrets.token_bytes(32)
+        print(f"🔑 Сгенерирован новый секрет (32 байта):")
+        print(f"   {secret.hex()}")
+        print()
+
+    if len(secret) != 32:
+        print(f"Ошибка: секрет должен быть 32 байта, а не {len(secret)}")
+        sys.exit(1)
+
+    print("=" * 60)
+    print("Вставьте этот код в license_manager.py:")
+    print("=" * 60)
+    print(generate_obfuscated_block(secret, "_APP_OBF_HEX"))
+
+    print("\n" + "=" * 60)
+    print("Вставьте этот код в bot/license_manager_bot.py:")
+    print("=" * 60)
+    print(generate_obfuscated_block(secret, "_BOT_OBF_HEX"))
+
+    print("\n" + "=" * 60)
+    print(f"Чистый секрет (для тестов): {secret.hex()}")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
+
+==================================================
+FILE: .\setup_ui.py
+==================================================
+"""
+setup_ui.py — стартовое окно настроек Ghost-AI.
+Включает 4 секции: backend, системный промпт, основные хоткеи,
+ресайз UI, прозрачность/видимость, kill switch.
+"""
+import logging
+import tkinter as tk
+from tkinter import ttk, messagebox
+from typing import Callable, Optional, Dict
+
+import keyboard
+
+from config import AppConfig
+
+logger = logging.getLogger(__name__)
+
+
+class SetupUI:
+    def __init__(self, on_complete: Callable[[AppConfig], None]):
+        self.on_complete = on_complete
+        self.config = AppConfig.load()
+
+        self._listening_action: Optional[str] = None
+        self._listening_kind: Optional[str] = None
+        self._listening_top: Optional[tk.Toplevel] = None
+        self._listen_hook = None
+
+        self.root = tk.Tk()
+        self.root.title("Ghost-AI — Setup")
+        self.root.geometry("620x900")
+        self.root.minsize(620, 900)
+        self.root.resizable(False, False)
+        self.root.configure(bg="#1e1e1e")
+
+        self._build_ui()
+        self._load_into_fields()
+
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.root.mainloop()
+
+    # ============================================================
+    #  Построение UI
+    # ============================================================
+
+    def _build_ui(self) -> None:
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        for k, v in {
+            "TFrame":      {"background": "#1e1e1e"},
+            "TLabel":      {"background": "#1e1e1e", "foreground": "#ffffff"},
+            "TLabelframe": {"background": "#1e1e1e", "foreground": "#00d4ff"},
+            "TLabelframe.Label": {
+                "background": "#1e1e1e", "foreground": "#00d4ff",
+                "font": ("Segoe UI", 10, "bold"),
+            },
+            "TButton":     {"padding": 6},
+            "TRadiobutton": {"background": "#1e1e1e", "foreground": "#ffffff"},
+            "TEntry":      {"fieldbackground": "#2a2a2a",
+                            "foreground": "#ffffff", "insertcolor": "#ffffff"},
+            "TSpinbox":    {"fieldbackground": "#2a2a2a", "foreground": "#ffffff"},
+        }.items():
+            style.configure(k, **v)
+
+        # ===== Canvas + scroll =====
+        outer = ttk.Frame(self.root)
+        outer.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(outer, bg="#1e1e1e", highlightthickness=0)
+        scrollbar = ttk.Scrollbar(outer, orient="vertical",
+                                  command=canvas.yview)
+        scroll_frame = ttk.Frame(canvas)
+        scroll_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True,
+                    padx=(20, 0), pady=10)
+        scrollbar.pack(side="right", fill="y", padx=(0, 20), pady=10)
+
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        c = scroll_frame
+
+        # --- Заголовок ---
+        tk.Label(c, text="👻 Ghost-AI Setup",
+                 font=("Segoe UI", 18, "bold"),
+                 bg="#1e1e1e", fg="#00d4ff").pack(pady=(5, 5))
+        tk.Label(c, text="Выберите режим и настройте горячие клавиши",
+                 font=("Segoe UI", 9),
+                 bg="#1e1e1e", fg="#888888").pack(pady=(0, 10))
+
+        # ============ Backend ============
+        bf = ttk.LabelFrame(c, text="Режим работы", padding=10)
+        bf.pack(fill="x", pady=5)
+
+        self.backend_var = tk.StringVar(value=self.config.backend or "ollama")
+        ttk.Radiobutton(bf, text="🦙 Ollama (локально)",
+                        variable=self.backend_var, value="ollama",
+                        command=self._on_backend_change).grid(
+            row=0, column=0, sticky="w", pady=2)
+        ttk.Radiobutton(bf, text="☁️  OpenRouter (облако)",
+                        variable=self.backend_var, value="openrouter",
+                        command=self._on_backend_change).grid(
+            row=1, column=0, sticky="w", pady=2)
+
+        ttk.Label(bf, text="Ollama URL:").grid(
+            row=2, column=0, sticky="w", pady=(8, 0))
+        self.ollama_url_var = tk.StringVar()
+        ttk.Entry(bf, textvariable=self.ollama_url_var).grid(
+            row=2, column=1, sticky="ew", pady=(8, 0), padx=(10, 0))
+
+        ttk.Label(bf, text="Модель Ollama:").grid(
+            row=3, column=0, sticky="w", pady=4)
+        self.ollama_model_var = tk.StringVar()
+        self.ollama_model_entry = ttk.Entry(bf, textvariable=self.ollama_model_var)
+        self.ollama_model_entry.grid(row=3, column=1, sticky="ew",
+                                     pady=4, padx=(10, 0))
+
+        ttk.Label(bf, text="OpenRouter API Key:").grid(
+            row=4, column=0, sticky="w", pady=4)
+        self.openrouter_key_var = tk.StringVar()
+        self.openrouter_key_entry = ttk.Entry(
+            bf, textvariable=self.openrouter_key_var, show="•"
+        )
+        self.openrouter_key_entry.grid(
+            row=4, column=1, sticky="ew", pady=4, padx=(10, 0))
+
+        ttk.Label(bf, text="Модель OpenRouter:").grid(
+            row=5, column=0, sticky="w", pady=4)
+        self.openrouter_model_var = tk.StringVar(value="llama-4-scout")
+        ttk.Entry(bf, textvariable=self.openrouter_model_var,
+                  state="readonly").grid(
+            row=5, column=1, sticky="ew", pady=4, padx=(10, 0))
+
+        bf.columnconfigure(1, weight=1)
+
+        # ============ Системный промпт ============
+        prompts_frame = ttk.LabelFrame(
+            c, text="📝 Промпты (что AI получит на каждом скриншоте)", padding=10
+        )
+        prompts_frame.pack(fill="x", pady=8)
+
+        # Системный промпт — роль/стиль
+        tk.Label(prompts_frame,
+                 text="Системный промпт (задаёт роль и стиль ответа):",
+                 bg="#1e1e1e", fg="#00d4ff",
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        self.system_prompt_text = tk.Text(
+            prompts_frame, height=3, bg="#2a2a2a", fg="#ffffff",
+            insertbackground="#ffffff", wrap=tk.WORD,
+            font=("Segoe UI", 9),
+        )
+        self.system_prompt_text.pack(fill="x", pady=(2, 8))
+
+        # Пользовательский промпт — что делать с изображением
+        tk.Label(prompts_frame,
+                 text="Промпт пользователя (отправляется с КАЖДЫМ скриншотом):",
+                 bg="#1e1e1e", fg="#00d4ff",
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        self.user_prompt_text = tk.Text(
+            prompts_frame, height=2, bg="#2a2a2a", fg="#ffffff",
+            insertbackground="#ffffff", wrap=tk.WORD,
+            font=("Segoe UI", 9),
+        )
+        self.user_prompt_text.pack(fill="x", pady=(2, 0))
+
+
+        # ============ Основные хоткеи ============
+        hk = ttk.LabelFrame(c, text="🔥 Основные горячие клавиши", padding=10)
+        hk.pack(fill="x", pady=8)
+        self.hotkey_labels = {}
+        for i, (action, label) in enumerate([
+            ("screenshot",    "📸 Скриншот и анализ"),
+            ("toggle_follow", "🎯 Следование за курсором"),
+            ("reset",         "🔄 Сброс UI"),
+        ]):
+            ttk.Label(hk, text=label).grid(row=i, column=0,
+                                           sticky="w", pady=2)
+            var = tk.StringVar(value=self.config.hotkeys.get(action, "—"))
+            self.hotkey_labels[action] = var
+            ttk.Label(hk, textvariable=var, width=18,
+                      foreground="#00d4ff").grid(row=i, column=1, padx=10)
+            ttk.Button(hk, text="Изменить",
+                       command=lambda a=action: self._start_rebind(a, "hotkey")
+                       ).grid(row=i, column=2, padx=5)
+        hk.columnconfigure(0, weight=1)
+
+        # ============ Ресайз UI ============
+        rs = ttk.LabelFrame(c, text="📐 Клавиши изменения размера UI", padding=10)
+        rs.pack(fill="x", pady=8)
+        self.capture_key_labels = {}
+        for i, (action, label) in enumerate([
+            ("expand_right",  "→ Расширить вправо"),
+            ("shrink_left",   "← Сузить слева"),
+            ("expand_down",   "↓ Расширить вниз"),
+            ("shrink_up",     "↑ Сузить сверху"),
+            ("expand_all",    "⤢ Расширить всё"),
+            ("shrink_all",    "⤡ Сузить всё"),
+            ("reset_capture", "⏹ Сброс"),
+        ], start=1):
+            ttk.Label(rs, text=label).grid(row=i, column=0,
+                                           sticky="w", pady=2)
+            var = tk.StringVar(value=self.config.capture_keys.get(action, "—"))
+            self.capture_key_labels[action] = var
+            ttk.Label(rs, textvariable=var, width=22,
+                      foreground="#00d4ff").grid(row=i, column=1, padx=10)
+            ttk.Button(rs, text="Изменить",
+                       command=lambda a=action: self._start_rebind(a, "capture")
+                       ).grid(row=i, column=2, padx=5)
+        rs.columnconfigure(0, weight=1)
+
+        # ============ Прозрачность / видимость ============
+        vs = ttk.LabelFrame(
+            c, text="👁 Прозрачность, click-through, невидимка", padding=10
+        )
+        vs.pack(fill="x", pady=8)
+        self.visibility_key_labels = {}
+        for i, (action, label) in enumerate([
+            ("increase_alpha",      "🔼 Увеличить видимость (менее прозрачно)"),
+            ("decrease_alpha",      "🔽 Уменьшить видимость (прозрачнее)"),
+            ("toggle_clickthrough", "🖱 Пропускать клики через окно"),
+            ("toggle_invisible",    "👻 Режим невидимки (полностью скрыть)"),
+        ], start=1):
+            ttk.Label(vs, text=label).grid(row=i, column=0,
+                                           sticky="w", pady=2)
+            var = tk.StringVar(value=self.config.visibility_keys.get(action, "—"))
+            self.visibility_key_labels[action] = var
+            ttk.Label(vs, textvariable=var, width=22,
+                      foreground="#00d4ff").grid(row=i, column=1, padx=10)
+            ttk.Button(vs, text="Изменить",
+                       command=lambda a=action: self._start_rebind(a, "visibility")
+                       ).grid(row=i, column=2, padx=5)
+        vs.columnconfigure(0, weight=1)
+
+        # ============ Kill switch ============
+        ks = ttk.LabelFrame(c, text="💀 Kill Switch (экстренное завершение)", padding=10)
+        ks.pack(fill="x", pady=8)
+        ttk.Label(ks, text="Горячая клавиша для полного выхода:").grid(
+            row=0, column=0, sticky="w", pady=2)
+        self.kill_key_var = tk.StringVar(value=self.config.kill_key)
+        ttk.Label(ks, textvariable=self.kill_key_var, width=22,
+                  foreground="#ff5555").grid(row=0, column=1, padx=10)
+        ttk.Button(ks, text="Изменить",
+                   command=lambda: self._start_rebind("kill", "kill")
+                   ).grid(row=0, column=2, padx=5)
+        ks.columnconfigure(0, weight=1)
+
+                # ============ Контекст диалога ============
+        ctx_frame = ttk.LabelFrame(
+            c, text="💬 Контекст диалога", padding=10
+        )
+        ctx_frame.pack(fill="x", pady=8)
+
+        # Лимит пар
+        ttk.Label(ctx_frame, text="Максимум пар (вопрос-ответ):").grid(
+            row=0, column=0, sticky="w", pady=2)
+        self.max_pairs_var = tk.IntVar(value=self.config.max_context_pairs)
+        ttk.Spinbox(ctx_frame, from_=0, to=50, increment=1,
+                    textvariable=self.max_pairs_var, width=8).grid(
+            row=0, column=1, sticky="w", padx=10, pady=2)
+        ttk.Label(ctx_frame, text="(0 = выключить контекст)",
+                  foreground="#888888").grid(
+            row=0, column=2, sticky="w", pady=2)
+
+        # Чекбокс: сохранять в файл
+        self.persist_var = tk.BooleanVar(value=self.config.persist_context)
+        ttk.Checkbutton(
+            ctx_frame,
+            text="Сохранять контекст в файл между запусками",
+            variable=self.persist_var,
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=4)
+
+        # Чекбокс: изображения в контексте
+        self.include_images_var = tk.BooleanVar(
+            value=self.config.include_images_in_context
+        )
+        ttk.Checkbutton(
+            ctx_frame,
+            text="Передавать изображения из истории (тратит больше токенов)",
+            variable=self.include_images_var,
+        ).grid(row=2, column=0, columnspan=3, sticky="w", pady=4)
+
+        # Хоткей сброса
+        ttk.Label(ctx_frame, text="Сброс контекста:").grid(
+            row=3, column=0, sticky="w", pady=(8, 2))
+        self.reset_context_key_var = tk.StringVar(
+            value=self.config.reset_context_key
+        )
+        ttk.Label(ctx_frame, textvariable=self.reset_context_key_var,
+                  width=22, foreground="#00d4ff").grid(
+            row=3, column=1, sticky="w", padx=10, pady=(8, 2))
+        ttk.Button(
+            ctx_frame, text="Изменить",
+            command=lambda: self._start_rebind("reset_context", "context_key"),
+        ).grid(row=3, column=2, padx=5, pady=(8, 2))
+
+        ctx_frame.columnconfigure(0, weight=1)
+
+
+        # ============ Кнопки снизу (закреплены) ============
+        btn_frame = ttk.Frame(self.root)
+        btn_frame.pack(side="bottom", fill="x", padx=20, pady=15)
+        tk.Frame(self.root, bg="#00d4ff", height=1).pack(
+            side="bottom", fill="x")
+        ttk.Button(btn_frame, text="Отмена", command=self._on_close).pack(
+            side="right", padx=5)
+        ttk.Button(btn_frame, text="💾 Сохранить и запустить",
+                   command=self._save_and_start).pack(side="right", padx=5)
+
+    # ============================================================
+    #  Загрузка / валидация
+    # ============================================================
+
+    def _load_into_fields(self) -> None:
+        self.ollama_url_var.set(self.config.ollama_url)
+        self.ollama_model_var.set(self.config.ollama_model)
+        self.openrouter_key_var.set(self.config.openrouter_api_key)
+
+        # Промпты
+        self.system_prompt_text.delete("1.0", tk.END)
+        self.system_prompt_text.insert("1.0", self.config.system_prompt)
+        self.user_prompt_text.delete("1.0", tk.END)
+        self.user_prompt_text.insert("1.0", self.config.user_prompt)
+
+        self._on_backend_change()
+
+    def _on_backend_change(self) -> None:
+        is_ollama = (self.backend_var.get() == "ollama")
+        self.ollama_model_entry.config(state="normal" if is_ollama else "disabled")
+        self.openrouter_key_entry.config(state="normal" if not is_ollama else "disabled")
+
+    # ============================================================
+    #  Rebind (общий для всех категорий)
+    # ============================================================
+
+    def _start_rebind(self, action: str, kind: str) -> None:
+        if self._listening_action is not None:
+            return
+        self._listening_action = action
+        self._listening_kind = kind
+
+        win = tk.Toplevel(self.root)
+        win.title("Нажмите клавишу")
+        win.geometry("340x170")
+        win.configure(bg="#1e1e1e")
+        win.transient(self.root)
+        win.grab_set()
+        win.resizable(False, False)
+        self._listening_top = win
+
+        labels = {
+            "screenshot":          "скриншота",
+            "toggle_follow":       "следования за курсором",
+            "reset":               "сброса UI",
+            "expand_right":        "расширения вправо",
+            "shrink_left":         "сужения слева",
+            "expand_down":         "расширения вниз",
+            "shrink_up":           "сужения сверху",
+            "expand_all":          "расширения всего",
+            "shrink_all":          "сужения всего",
+            "reset_capture":       "сброса размера",
+            "increase_alpha":      "увеличения видимости",
+            "decrease_alpha":      "уменьшения видимости",
+            "toggle_clickthrough": "пропуска кликов",
+            "toggle_invisible":    "режима невидимки",
+            "kill":                "экстренного завершения",
+        }
+        action_label = labels.get(action, action)
+
+        tk.Label(
+            win, text=f"Нажмите новую клавишу для {action_label}…",
+            bg="#1e1e1e", fg="#ffffff",
+            font=("Segoe UI", 10), wraplength=300,
+        ).pack(pady=(20, 5))
+        tk.Label(
+            win,
+            text="Примеры: right, ctrl+up, mouse wheel up\n(Esc — отмена)",
+            bg="#1e1e1e", fg="#888888",
+            font=("Segoe UI", 8), justify="center",
+        ).pack()
+        ttk.Button(
+            win, text="Отмена",
+            command=lambda: self._finish_rebind(None),
+        ).pack(pady=10)
+
+        self._listen_hook = keyboard.on_press(self._on_rebind_key,
+                                              suppress=False)
+
+    def _on_rebind_key(self, event) -> None:
+        key = (event.name or "").lower()
+        if not key:
+            return
+        self.root.after(0, lambda: self._finish_rebind(key))
+
+    def _finish_rebind(self, new_key: Optional[str]) -> None:
+        if self._listen_hook is not None:
+            try:
+                keyboard.unhook(self._listen_hook)
+            except Exception:
+                pass
+            self._listen_hook = None
+        if self._listening_top is not None:
+            try:
+                self._listening_top.grab_release()
+                self._listening_top.destroy()
+            except tk.TclError:
+                pass
+            self._listening_top = None
+
+        action = self._listening_action
+        kind = self._listening_kind
+        self._listening_action = None
+        self._listening_kind = None
+
+        if not new_key or new_key == "esc":
+            return
+
+        if kind == "hotkey":
+            self.config.hotkeys[action] = new_key
+            if action in self.hotkey_labels:
+                self.hotkey_labels[action].set(new_key)
+        elif kind == "capture":
+            self.config.capture_keys[action] = new_key
+            if action in self.capture_key_labels:
+                self.capture_key_labels[action].set(new_key)
+        elif kind == "visibility":
+            self.config.visibility_keys[action] = new_key
+            if action in self.visibility_key_labels:
+                self.visibility_key_labels[action].set(new_key)
+        elif kind == "kill":
+            self.config.kill_key = new_key
+            if hasattr(self, "kill_key_var"):
+                self.kill_key_var.set(new_key)
+        elif kind == "context_key":
+            self.config.reset_context_key = new_key
+            if hasattr(self, "reset_context_key_var"):
+                self.reset_context_key_var.set(new_key)
+
+
+    # ============================================================
+    #  Сохранение
+    # ============================================================
+
+    def _save_and_start(self) -> None:
+        backend = self.backend_var.get()
+        ollama_url = self.ollama_url_var.get().strip() or "http://localhost:11434"
+        ollama_model = self.ollama_model_var.get().strip()
+        or_key = self.openrouter_key_var.get().strip()
+
+        if backend == "ollama" and not ollama_model:
+            messagebox.showerror("Ошибка", "Укажите модель Ollama.")
+            return
+        if backend == "openrouter" and not or_key:
+            messagebox.showerror("Ошибка", "Введите API-ключ OpenRouter.")
+            return
+
+        self.config.backend = backend
+        self.config.ollama_url = ollama_url
+        self.config.ollama_model = ollama_model
+        self.config.openrouter_api_key = or_key
+        self.config.system_prompt = self.system_prompt_text.get(
+            "1.0", tk.END
+        ).strip()
+
+        self.config.max_context_pairs = int(self.max_pairs_var.get())
+        self.config.persist_context = bool(self.persist_var.get())
+        self.config.include_images_in_context = bool(
+            self.include_images_var.get()
+        )
+        self.config.save()
+
+        self.config.system_prompt = self.system_prompt_text.get(
+            "1.0", tk.END
+        ).strip()
+        self.config.user_prompt = self.user_prompt_text.get(
+            "1.0", tk.END
+        ).strip()
+        self.config.max_context_pairs = int(self.max_pairs_var.get())
+        self.config.persist_context = bool(self.persist_var.get())
+        self.config.include_images_in_context = bool(
+            self.include_images_var.get()
+        )
+
+
+        self.config.save()
+
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
+
+        logger.info("Setup завершён: backend=%s", backend)
+        try:
+            self.on_complete(self.config)
+        except Exception as e:
+            logger.error("Ошибка в on_complete: %s", e, exc_info=True)
+
+    def _on_close(self) -> None:
+        if messagebox.askokcancel(
+            "Выход",
+            "Прервать настройку? Ghost-AI не запустится без конфигурации."
+        ):
+            try:
+                if self._listen_hook is not None:
+                    keyboard.unhook(self._listen_hook)
+            except Exception:
+                pass
+            self.root.destroy()
+            raise SystemExit(0)
+
+==================================================
+FILE: .\test_obf.py
+==================================================
+"""Тест обфускации."""
+import hashlib
+import secrets as _secrets_lib
+
+_KEY_HASH = "f3d77924997275d9"
+_MARKER = "ghost_ai_default_build_marker_2024"
+_APP_OBF_HEX = "bf33b4113b6110ccc4b2d3c01eb6460096376972809bcc980d354c473dc5f54c"
+
+
+def _unobf_v1():
+    _h = hashlib.sha256(_MARKER.encode("utf-8")).digest()
+    return hashlib.sha256(_h).digest()
+
+
+def _unobf_v2(seed):
+    _raw = bytes.fromhex(_APP_OBF_HEX)
+    return bytes(b ^ seed[i % len(seed)] for i, b in enumerate(_raw))
+
+
+def _check_marker(key):
+    return hashlib.sha256(key).hexdigest()[:16] == _KEY_HASH
+
+
+def _get_license_secret():
+    _k = _unobf_v1()
+    if not _check_marker(_k):
+        return _secrets_lib.token_bytes(32)
+    return _unobf_v2(_k)
+
+
+secret = _get_license_secret()
+print(f"Расшифрованный секрет ({len(secret)} байт):")
+print(secret.hex())
+print()
+
+expected = "21cb68e8e505c3c4b6a2fdaa80347dd057239a8c59c2e2d1d3a9eefe73d3ca2e"
+if secret.hex() == expected:
+    print("✅ СОВПАДАЕТ — обфускация работает корректно")
+else:
+    print("❌ НЕ СОВПАДАЕТ")
+    print(f"Ожидалось: {expected}")
+
+==================================================
+FILE: .\ui.py
+==================================================
+"""
+ui.py — прозрачное окно Ghost-AI с поддержкой:
+  - динамической прозрачности
+  - click-through (пропуск кликов)
+  - режима невидимости
+"""
+import tkinter as tk
+import ctypes
+import threading
+import logging
+from enum import Enum
+from typing import Optional, Callable
+
+logger = logging.getLogger(__name__)
+
+
+class WindowState(Enum):
+    IDLE = "idle"
+    PROCESSING = "processing"
+    ERROR = "error"
+
+
+class GhostUI:
+    WINDOW_WIDTH = 350
+    WINDOW_HEIGHT = 200
+    MIN_WINDOW_WIDTH = 100
+    MIN_WINDOW_HEIGHT = 50
+    GRIP_SIZE = 15
+    POSITION_UPDATE_MS = 10
+    WDA_EXCLUDEFROMCAPTURE = 0x11
+
+    # Windows extended window styles
+    WS_EX_LAYERED = 0x00080000
+    WS_EX_TRANSPARENT = 0x00000020        # click-through
+    GWL_EXSTYLE = -20
+
+    def __init__(self, alpha: float = 0.5,
+                 alpha_min: float = 0.05,
+                 alpha_max: float = 1.0):
+        self.WINDOW_ALPHA = max(alpha_min, min(alpha, alpha_max))
+        self._alpha_min = alpha_min
+        self._alpha_max = alpha_max
+
+        self.state: WindowState = WindowState.IDLE
+        self.is_following: bool = True
+        self.ui_lock = threading.Lock()
+        self._drag_start_x: int = 0
+        self._drag_start_y: int = 0
+        self._on_follow_toggle: Optional[Callable[[bool], None]] = None
+
+        # Состояния видимости
+        self._is_clickthrough: bool = False
+        self._is_invisible: bool = False
+
+        self._setup_window()
+        self._setup_widgets()
+        self.activate_stealth()
+
+    # ============================================================
+    #  Инициализация
+    # ============================================================
+
+    def _setup_window(self) -> None:
+        self.root = tk.Tk()
+        self.root.title("Ghost-AI")
+        self.root.overrideredirect(True)
+        self.root.attributes("-topmost", True)
+        self.root.attributes("-alpha", self.WINDOW_ALPHA)
+        self.root.config(bg='black')
+        self.root.geometry(f"{self.WINDOW_WIDTH}x{self.WINDOW_HEIGHT}")
+
+    def _setup_widgets(self) -> None:
+        self.text_area = tk.Text(
+            self.root,
+            wrap=tk.WORD, bg='black', fg='white',
+            font=("Consolas", 10), bd=0, highlightthickness=0,
+            selectbackground='black', selectforeground='white',
+            inactiveselectbackground='black', exportselection=False,
+        )
+        self.text_area.pack(expand=True, fill='both', padx=5, pady=5)
+        self.text_area.config(state=tk.DISABLED)
+
+        self.grip = tk.Frame(self.root, bg='gray20',
+                             cursor="bottom_right_corner")
+        self.grip.place(relx=1.0, rely=1.0, anchor="se",
+                        width=self.GRIP_SIZE, height=self.GRIP_SIZE)
+        self.grip.bind("<B1-Motion>", self._on_resize)
+
+        self.text_area.bind("<Button-1>", self._on_start_drag)
+        self.text_area.bind("<B1-Motion>", self._on_do_drag)
+        self.text_area.bind("<MouseWheel>", self._on_mousewheel)
+        self.grip.bind("<MouseWheel>", self._on_mousewheel)
+
+    def activate_stealth(self) -> None:
+        if not self._is_windows():
+            logger.info("Скрытность недоступна: не Windows")
+            return
+        try:
+            self.root.update_idletasks()
+            hwnd = self.root.winfo_id()
+            while ctypes.windll.user32.GetParent(hwnd):
+                hwnd = ctypes.windll.user32.GetParent(hwnd)
+            ctypes.windll.user32.SetWindowDisplayAffinity(
+                hwnd, self.WDA_EXCLUDEFROMCAPTURE
+            )
+            logger.info("Режим скрытности активирован")
+        except Exception as e:
+            logger.warning(f"Не удалось активировать скрытность: {e}")
+
+    @staticmethod
+    def _is_windows() -> bool:
+        return hasattr(ctypes, 'windll')
+
+    def _get_hwnd(self) -> Optional[int]:
+        """Получить верхнеуровневый HWND окна (Windows)."""
+        if not self._is_windows():
+            return None
+        try:
+            self.root.update_idletasks()
+            hwnd = self.root.winfo_id()
+            while ctypes.windll.user32.GetParent(hwnd):
+                hwnd = ctypes.windll.user32.GetParent(hwnd)
+            return hwnd
+        except Exception:
+            return None
+
+    # ============================================================
+    #  Публичный API
+    # ============================================================
+
+    def log(self, message: str) -> None:
+        with self.ui_lock:
+            try:
+                self.text_area.config(state=tk.NORMAL)
+                self.text_area.delete("1.0", tk.END)
+                if message:
+                    self.text_area.insert("1.0", message)
+                self.text_area.config(state=tk.DISABLED)
+            except tk.TclError:
+                pass
+            except Exception as e:
+                logger.error(f"Ошибка логирования: {e}")
+
+    def set_state(self, state: WindowState) -> None:
+        self.state = state
+
+    def toggle_follow(self) -> bool:
+        self.is_following = not self.is_following
+        status = "включен" if self.is_following else "отключен"
+        logger.info(f"Отслеживание курсора {status}")
+        if self._on_follow_toggle:
+            try:
+                self._on_follow_toggle(self.is_following)
+            except Exception as e:
+                logger.error(f"Ошибка в callback: {e}")
+        return self.is_following
+
+    def set_position(self, x: int, y: int) -> None:
+        if not self.is_following or self._is_invisible:
+            return
+        try:
+            self.root.geometry(f"+{x}+{y}")
+        except tk.TclError:
+            pass
+
+    def apply_size(self, width: int, height: int) -> None:
+        try:
+            self.root.geometry(f"{width}x{height}")
+        except tk.TclError:
+            pass
+
+    def get_geometry(self) -> tuple:
+        try:
+            return (
+                self.root.winfo_x(), self.root.winfo_y(),
+                self.root.winfo_width(), self.root.winfo_height(),
+            )
+        except tk.TclError:
+            return 0, 0, self.WINDOW_WIDTH, self.WINDOW_HEIGHT
+
+    def schedule(self, callback: Callable[[], None]) -> None:
+        try:
+            self.root.after(self.POSITION_UPDATE_MS, callback)
+        except tk.TclError:
+            pass
+
+    def mainloop(self) -> None:
+        try:
+            self.root.mainloop()
+        except KeyboardInterrupt:
+            pass
+
+    def destroy(self) -> None:
+        try:
+            self.root.quit()
+            self.root.destroy()
+        except tk.TclError:
+            pass
+
+    def set_on_follow_toggle(self, callback: Callable[[bool], None]) -> None:
+        self._on_follow_toggle = callback
+
+    # ============================================================
+    #  Прозрачность
+    # ============================================================
+
+    def set_alpha(self, alpha: float) -> None:
+        alpha = max(self._alpha_min, min(alpha, self._alpha_max))
+        try:
+            self.root.attributes("-alpha", alpha)
+            self.WINDOW_ALPHA = alpha
+        except tk.TclError:
+            pass
+
+    def get_alpha(self) -> float:
+        return self.WINDOW_ALPHA
+
+    def adjust_alpha(self, delta: float) -> None:
+        self.set_alpha(self.WINDOW_ALPHA + delta)
+
+    # ============================================================
+    #  Click-through (Windows only)
+    # ============================================================
+
+    def set_clickthrough(self, enabled: bool) -> bool:
+        """
+        Включить/выключить пропуск кликов.
+        Возвращает фактическое состояние.
+        """
+        if not self._is_windows():
+            logger.warning("click-through недоступен на этой ОС")
+            return False
+
+        hwnd = self._get_hwnd()
+        if hwnd is None:
+            return False
+
+        try:
+            current = ctypes.windll.user32.GetWindowLongW(
+                hwnd, self.GWL_EXSTYLE
+            )
+            if enabled:
+                new = current | self.WS_EX_LAYERED | self.WS_EX_TRANSPARENT
+            else:
+                new = current & ~self.WS_EX_TRANSPARENT
+
+            ctypes.windll.user32.SetWindowLongW(hwnd, self.GWL_EXSTYLE, new)
+
+            self._is_clickthrough = enabled
+            logger.info("Click-through: %s", "ON" if enabled else "OFF")
+            return True
+        except Exception as e:
+            logger.error("set_clickthrough error: %s", e)
+            return False
+
+    def toggle_clickthrough(self) -> bool:
+        return self.set_clickthrough(not self._is_clickthrough)
+
+    def is_clickthrough(self) -> bool:
+        return self._is_clickthrough
+
+    # ============================================================
+    #  Невидимость (полное скрытие + пропуск кликов)
+    # ============================================================
+
+    def set_invisible(self, invisible: bool) -> None:
+        """
+        Невидимка: окно полностью скрывается.
+        При повторном показе — прозрачность возвращается.
+        """
+        self._is_invisible = invisible
+
+        if invisible:
+            # Запоминаем текущую прозрачность, делаем прозрачным на 0
+            self._saved_alpha = self.WINDOW_ALPHA
+            try:
+                self.root.attributes("-alpha", 0.0)
+                self.root.withdraw()        # полностью скрыть из таскбара
+            except tk.TclError:
+                pass
+            logger.info("Окно скрыто (невидимка)")
+        else:
+            try:
+                self.root.deiconify()
+                # Восстанавливаем прозрачность
+                self.root.attributes("-alpha", getattr(self, "_saved_alpha", 0.5))
+            except tk.TclError:
+                pass
+            logger.info("Окно восстановлено")
+
+    def toggle_invisible(self) -> bool:
+        self.set_invisible(not self._is_invisible)
+        return self._is_invisible
+
+    def is_invisible(self) -> bool:
+        return self._is_invisible
+
+    # ============================================================
+    #  Внутренние обработчики
+    # ============================================================
+
+    def _on_start_drag(self, event: tk.Event) -> None:
+        self._drag_start_x = event.x
+        self._drag_start_y = event.y
+
+    def _on_do_drag(self, event: tk.Event) -> None:
+        if self.is_following or self._is_clickthrough:
+            return
+        dx = event.x - self._drag_start_x
+        dy = event.y - self._drag_start_y
+        self.root.geometry(
+            f"+{self.root.winfo_x() + dx}+{self.root.winfo_y() + dy}"
+        )
+
+    def _on_resize(self, event: tk.Event) -> None:
+        if self.is_following:
+            return
+        new_width = self.root.winfo_pointerx() - self.root.winfo_rootx()
+        new_height = self.root.winfo_pointery() - self.root.winfo_rooty()
+        if (new_width >= self.MIN_WINDOW_WIDTH
+                and new_height >= self.MIN_WINDOW_HEIGHT):
+            self.root.geometry(f"{new_width}x{new_height}")
+
+    def _on_mousewheel(self, event: tk.Event) -> None:
+        try:
+            cur_w = self.root.winfo_width()
+            cur_h = self.root.winfo_height()
+            step = 25
+            if event.delta > 0:
+                self.apply_size(cur_w + step, cur_h + step)
+            elif event.delta < 0:
+                self.apply_size(
+                    max(self.MIN_WINDOW_WIDTH, cur_w - step),
+                    max(self.MIN_WINDOW_HEIGHT, cur_h - step),
+                )
+        except tk.TclError:
+            pass
+        return "break"
+
+==================================================
+FILE: .\bot\.env
+==================================================
+BOT_TOKEN=8818208121:AAGd4CGY05np4RFnYW3YKlzKdKVg7kam8Dc
+==================================================
+FILE: .\bot\bot.py
+==================================================
+import os
+from telegram import Update, LabeledPrice
+from telegram.ext import (
+    Application, CommandHandler,
+    PreCheckoutQueryHandler, MessageHandler,
+    filters, ContextTypes
+)
+from license_manager_bot import generate_license
+
+# Загружаем токен из .env файла
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError(
+        "BOT_TOKEN не установлен!\n"
+        "Создайте файл .env рядом с bot.py:\n"
+        "  BOT_TOKEN=ваш_токен_от_botfather"
+    )
+
+PRICE_STARS = 100
+
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("👻 Ghost AI\n\n/buy — купить доступ на 30 дней")
+
+
+async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_invoice(
+        title="Ghost AI — 30 дней",
+        description="Умный ассистент с анализом изображений",
+        payload="ghost_ai_license",
+        currency="XTR",          # XTR = Telegram Stars
+        prices=[LabeledPrice("Ghost AI", PRICE_STARS)],
+    )
+
+
+async def pre_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Telegram требует ответить в течение 10 секунд
+    await update.pre_checkout_query.answer(ok=True)
+
+
+async def payment_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    key = generate_license(user_id)
+
+    await update.message.reply_text(
+        f"✅ Оплата получена!\n\n"
+        f"🔑 Твой ключ:\n`{key}`\n\n"
+        f"⏳ Действителен 30 дней.",
+        parse_mode="Markdown"
+    )
+
+
+app = Application.builder().token(BOT_TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("buy", buy))
+app.add_handler(PreCheckoutQueryHandler(pre_checkout))
+app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, payment_received))
+app.run_polling()
+==================================================
+FILE: .\bot\license_manager_bot.py
+==================================================
+"""
+license_manager_bot.py — генератор ключей для бота.
+
+Используется ТОЛЬКО на сервере бота, не в приложении.
+"""
+import base64
+import hashlib
+import hmac
+import json
+import time
+
+# ============================================================
+#  ОБФУСЦИРОВАННЫЙ LICENSE_SECRET (тот же, что в license_manager.py)
+# ============================================================
+import secrets as _secrets_lib
+
+_KEY_HASH = "f3d77924997275d9"
+_MARKER = "ghost_ai_default_build_marker_2024"
+
+_DECOY_A = "12f1bfd969661ca2fa909722e3943ed5c1a299b9ce873c8274f525d6c6144477d3c862ea408d2d8004a3dc31df659732"
+_DECOY_B = "11128d414affed423336bc70cd09e3b1d59e9f08525b77339dacc693e7355510"
+
+def _unobf_v1() -> bytes:
+    """Восстанавливает ключ раскрытия через двойной SHA256 маркера."""
+    _h = hashlib.sha256(_MARKER.encode("utf-8")).digest()
+    return hashlib.sha256(_h).digest()
+
+def _unobf_v2(seed: bytes) -> bytes:
+    """Применяет ключ к обфусцированным данным."""
+    _raw = bytes.fromhex(_BOT_OBF_HEX)
+    return bytes(b ^ seed[i % len(seed)] for i, b in enumerate(_raw))
+
+def _check_marker(key: bytes) -> bool:
+    return hashlib.sha256(key).hexdigest()[:16] == _KEY_HASH
+
+_BOT_OBF_HEX = "bf33b4113b6110ccc4b2d3c01eb6460096376972809bcc980d354c473dc5f54c"
+
+def _get_license_secret() -> bytes:
+    """Получить оригинальный LICENSE_SECRET (32 байта)."""
+    _k = _unobf_v1()
+    if not _check_marker(_k):
+        return _secrets_lib.token_bytes(32)
+    return _unobf_v2(_k)
+
+# ============================================================
+
+
+def generate_license(user_id: int, duration_days: int = 30) -> str:
+    """Генерирует ключ для пользователя."""
+    expires_at = int(time.time()) + duration_days * 86400
+    payload = json.dumps({"uid": user_id, "exp": expires_at})
+    payload_b64 = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+    secret = _get_license_secret()
+    sig = hmac.new(secret, payload_b64.encode(), hashlib.sha256).hexdigest()
+    return f"{payload_b64}.{sig}"
+
+
+def verify_license(key: str) -> dict | None:
+    """Проверить ключ (для отладки)."""
+    try:
+        payload_b64, sig = key.rsplit(".", 1)
+        secret = _get_license_secret()
+        expected = hmac.new(
+            secret, payload_b64.encode(), hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(sig, expected):
+            return None
+
+        padded = payload_b64 + "=" * ((4 - len(payload_b64) % 4) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode())
+
+        if time.time() > payload["exp"]:
+            return None
+
+        return payload
+    except Exception:
+        return None
+
+
+if __name__ == "__main__":
+    # Тест
+    print("Тест генерации и проверки:")
+    key = generate_license(123456789, 30)
+    print(f"Ключ: {key}")
+    result = verify_license(key)
+    print(f"Проверка: {result}")
+    print("✅ OK" if result and result["uid"] == 123456789 else "❌ FAIL")
