@@ -41,13 +41,12 @@ class ActivationUI:
         tk.Label(
             self.root,
             text="Введите лицензионный ключ\n"
-                 "(получен в @your_bot после оплаты)",
+                 "(получен в @gghostaibot после оплаты)",
             font=("Segoe UI", 10),
             bg="#1e1e1e", fg="#888888",
             justify="center",
         ).pack(pady=(0, 20))
 
-        # Поле ввода — длинное, т.к. формат base64.hex
         self.key_var = tk.StringVar()
         entry = tk.Entry(
             self.root, textvariable=self.key_var,
@@ -117,7 +116,7 @@ class ActivationUI:
         if data.is_expired:
             self.status_var.set(
                 f"❌ Срок лицензии истёк ({data.expires_str}).\n"
-                "Купите новую через @your_bot"
+                "Купите новую через @gghostaibot"
             )
             return
 
@@ -139,8 +138,7 @@ class ActivationUI:
 
     def _on_buy(self) -> None:
         import webbrowser
-        # Замените на свой username бота
-        webbrowser.open("https://t.me/your_bot")
+        webbrowser.open("https://t.me/gghostaibot")
 
     def _on_close(self) -> None:
         self.root.destroy()
