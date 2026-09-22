@@ -50,18 +50,18 @@ class SetupUI:
             pass
 
         for k, v in {
-            "TFrame":      {"background": "#1e1e1e"},
-            "TLabel":      {"background": "#1e1e1e", "foreground": "#ffffff"},
-            "TLabelframe": {"background": "#1e1e1e", "foreground": "#00d4ff"},
+            "TFrame":       {"background": "#1e1e1e"},
+            "TLabel":       {"background": "#1e1e1e", "foreground": "#ffffff"},
+            "TLabelframe":  {"background": "#1e1e1e", "foreground": "#00d4ff"},
             "TLabelframe.Label": {
                 "background": "#1e1e1e", "foreground": "#00d4ff",
                 "font": ("Segoe UI", 10, "bold"),
             },
-            "TButton":     {"padding": 6},
+            "TButton":      {"padding": 6},
             "TRadiobutton": {"background": "#1e1e1e", "foreground": "#ffffff"},
-            "TEntry":      {"fieldbackground": "#2a2a2a",
-                            "foreground": "#ffffff", "insertcolor": "#ffffff"},
-            "TSpinbox":    {"fieldbackground": "#2a2a2a", "foreground": "#ffffff"},
+            "TEntry":       {"fieldbackground": "#2a2a2a",
+                             "foreground": "#ffffff", "insertcolor": "#ffffff"},
+            "TSpinbox":     {"fieldbackground": "#2a2a2a", "foreground": "#ffffff"},
         }.items():
             style.configure(k, **v)
 
@@ -70,18 +70,27 @@ class SetupUI:
         outer.pack(fill="both", expand=True)
 
         canvas = tk.Canvas(outer, bg="#1e1e1e", highlightthickness=0)
-        scrollbar = ttk.Scrollbar(outer, orient="vertical",
-                                  command=canvas.yview)
+        scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
         scroll_frame = ttk.Frame(canvas)
+
+        # Сохраняем id созданного окна в canvas
+        canvas_window = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+
+        # Обновление области скролла при изменении высоты содержимого
         scroll_frame.bind(
             "<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
-        canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+
+        # АВТОМАСШТАБИРОВАНИЕ: при изменении ширины окна подгоняем ширину фрейма ровно под canvas
+        canvas.bind(
+            "<Configure>",
+            lambda e: canvas.itemconfig(canvas_window, width=e.width)
+        )
+
         canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.pack(side="left", fill="both", expand=True,
-                    padx=(20, 0), pady=10)
-        scrollbar.pack(side="right", fill="y", padx=(0, 20), pady=10)
+        canvas.pack(side="left", fill="both", expand=True, padx=(15, 5), pady=10)
+        scrollbar.pack(side="right", fill="y", padx=(0, 15), pady=10)
 
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
@@ -172,7 +181,6 @@ class SetupUI:
         )
         self.user_prompt_text.pack(fill="x", pady=(2, 0))
 
-
         # ============ Основные хоткеи ============
         hk = ttk.LabelFrame(c, text="🔥 Основные горячие клавиши", padding=10)
         hk.pack(fill="x", pady=8)
@@ -182,12 +190,11 @@ class SetupUI:
             ("toggle_follow", "🎯 Следование за курсором"),
             ("reset",         "🔄 Сброс UI"),
         ]):
-            ttk.Label(hk, text=label).grid(row=i, column=0,
-                                           sticky="w", pady=2)
+            ttk.Label(hk, text=label).grid(row=i, column=0, sticky="w", pady=2)
             var = tk.StringVar(value=self.config.hotkeys.get(action, "—"))
             self.hotkey_labels[action] = var
-            ttk.Label(hk, textvariable=var, width=18,
-                      foreground="#00d4ff").grid(row=i, column=1, padx=10)
+            ttk.Label(hk, textvariable=var, width=16,
+                      foreground="#00d4ff", anchor="center").grid(row=i, column=1, padx=8)
             ttk.Button(hk, text="Изменить",
                        command=lambda a=action: self._start_rebind(a, "hotkey")
                        ).grid(row=i, column=2, padx=5)
@@ -206,12 +213,11 @@ class SetupUI:
             ("shrink_all",    "⤡ Сузить всё"),
             ("reset_capture", "⏹ Сброс"),
         ], start=1):
-            ttk.Label(rs, text=label).grid(row=i, column=0,
-                                           sticky="w", pady=2)
+            ttk.Label(rs, text=label).grid(row=i, column=0, sticky="w", pady=2)
             var = tk.StringVar(value=self.config.capture_keys.get(action, "—"))
             self.capture_key_labels[action] = var
-            ttk.Label(rs, textvariable=var, width=22,
-                      foreground="#00d4ff").grid(row=i, column=1, padx=10)
+            ttk.Label(rs, textvariable=var, width=18,
+                      foreground="#00d4ff", anchor="center").grid(row=i, column=1, padx=8)
             ttk.Button(rs, text="Изменить",
                        command=lambda a=action: self._start_rebind(a, "capture")
                        ).grid(row=i, column=2, padx=5)
@@ -229,12 +235,11 @@ class SetupUI:
             ("toggle_clickthrough", "🖱 Пропускать клики через окно"),
             ("toggle_invisible",    "👻 Режим невидимки (полностью скрыть)"),
         ], start=1):
-            ttk.Label(vs, text=label).grid(row=i, column=0,
-                                           sticky="w", pady=2)
+            ttk.Label(vs, text=label).grid(row=i, column=0, sticky="w", pady=2)
             var = tk.StringVar(value=self.config.visibility_keys.get(action, "—"))
             self.visibility_key_labels[action] = var
-            ttk.Label(vs, textvariable=var, width=22,
-                      foreground="#00d4ff").grid(row=i, column=1, padx=10)
+            ttk.Label(vs, textvariable=var, width=18,
+                      foreground="#00d4ff", anchor="center").grid(row=i, column=1, padx=8)
             ttk.Button(vs, text="Изменить",
                        command=lambda a=action: self._start_rebind(a, "visibility")
                        ).grid(row=i, column=2, padx=5)
@@ -246,31 +251,29 @@ class SetupUI:
         ttk.Label(ks, text="Горячая клавиша для полного выхода:").grid(
             row=0, column=0, sticky="w", pady=2)
         self.kill_key_var = tk.StringVar(value=self.config.kill_key)
-        ttk.Label(ks, textvariable=self.kill_key_var, width=22,
-                  foreground="#ff5555").grid(row=0, column=1, padx=10)
+        ttk.Label(ks, textvariable=self.kill_key_var, width=18,
+                  foreground="#ff5555", anchor="center").grid(row=0, column=1, padx=8)
         ttk.Button(ks, text="Изменить",
                    command=lambda: self._start_rebind("kill", "kill")
                    ).grid(row=0, column=2, padx=5)
         ks.columnconfigure(0, weight=1)
 
-                # ============ Контекст диалога ============
+        # ============ Контекст диалога ============
         ctx_frame = ttk.LabelFrame(
             c, text="💬 Контекст диалога", padding=10
         )
         ctx_frame.pack(fill="x", pady=8)
 
-        # Лимит пар
         ttk.Label(ctx_frame, text="Максимум пар (вопрос-ответ):").grid(
             row=0, column=0, sticky="w", pady=2)
         self.max_pairs_var = tk.IntVar(value=self.config.max_context_pairs)
         ttk.Spinbox(ctx_frame, from_=0, to=50, increment=1,
-                    textvariable=self.max_pairs_var, width=8).grid(
+                    textvariable=self.max_pairs_var, width=6).grid(
             row=0, column=1, sticky="w", padx=10, pady=2)
         ttk.Label(ctx_frame, text="(0 = выключить контекст)",
                   foreground="#888888").grid(
             row=0, column=2, sticky="w", pady=2)
 
-        # Чекбокс: сохранять в файл
         self.persist_var = tk.BooleanVar(value=self.config.persist_context)
         ttk.Checkbutton(
             ctx_frame,
@@ -278,7 +281,6 @@ class SetupUI:
             variable=self.persist_var,
         ).grid(row=1, column=0, columnspan=3, sticky="w", pady=4)
 
-        # Чекбокс: изображения в контексте
         self.include_images_var = tk.BooleanVar(
             value=self.config.include_images_in_context
         )
@@ -288,22 +290,20 @@ class SetupUI:
             variable=self.include_images_var,
         ).grid(row=2, column=0, columnspan=3, sticky="w", pady=4)
 
-        # Хоткей сброса
         ttk.Label(ctx_frame, text="Сброс контекста:").grid(
             row=3, column=0, sticky="w", pady=(8, 2))
         self.reset_context_key_var = tk.StringVar(
             value=self.config.reset_context_key
         )
         ttk.Label(ctx_frame, textvariable=self.reset_context_key_var,
-                  width=22, foreground="#00d4ff").grid(
-            row=3, column=1, sticky="w", padx=10, pady=(8, 2))
+                  width=18, foreground="#00d4ff", anchor="center").grid(
+            row=3, column=1, sticky="w", padx=8, pady=(8, 2))
         ttk.Button(
             ctx_frame, text="Изменить",
             command=lambda: self._start_rebind("reset_context", "context_key"),
         ).grid(row=3, column=2, padx=5, pady=(8, 2))
 
         ctx_frame.columnconfigure(0, weight=1)
-
 
         # ============ Кнопки снизу (закреплены) ============
         btn_frame = ttk.Frame(self.root)
