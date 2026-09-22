@@ -2,6 +2,36 @@
 ghost.py — главный модуль Ghost-AI.
 """
 
+import ctypes
+import os
+import sys
+import time
+
+def anti_analysis_guard():
+    if not hasattr(ctypes, "windll"):
+        return
+    k32 = ctypes.windll.kernel32
+
+    # 1. Проверка флага отладчика в PEB
+    if k32.IsDebuggerPresent():
+        os._exit(0)
+
+    # 2. Проверка Remote Debugger (Cheat Engine, x64dbg)
+    is_debugger = ctypes.c_bool()
+    k32.CheckRemoteDebuggerPresent(k32.GetCurrentProcess(), ctypes.byref(is_debugger))
+    if is_debugger.value:
+        os._exit(0)
+
+    # 3. Детект точек останова по таймингу выполнения (RDTSC latency)
+    t1 = time.perf_counter_ns()
+    # пустая операция, замер задержки
+    x = sum(i for i in range(100))
+    t2 = time.perf_counter_ns()
+    if (t2 - t1) > 50_000_000:  # если поток стоял на брейкпоинте >50мс
+        os._exit(0)
+
+anti_analysis_guard()
+
 import sys
 import traceback
 
