@@ -12,12 +12,21 @@ namespace {
     const char* _MARKER = "ghost_ai_default_build_marker_2024";
     const char* _APP_OBF_HEX = "bf33b4113b6110ccc4b2d3c01eb6460096376972809bcc980d354c473dc5f54c";
 
-    std::string getLicenseFilePath() {
-        char userProfile[MAX_PATH];
-        if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
-            return std::string(userProfile) + "\\.ghost_ai_license.json";
+    std::wstring getLicenseFilePathW() {
+        wchar_t userProfile[MAX_PATH];
+        if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
+            return std::wstring(userProfile) + L"\\.ghost_ai_license.json";
         }
-        return ".ghost_ai_license.json";
+        return L".ghost_ai_license.json";
+    }
+
+    std::string getLicenseFilePath() {
+        std::wstring wp = getLicenseFilePathW();
+        int len = WideCharToMultiByte(CP_UTF8, 0, wp.c_str(), -1, NULL, 0, NULL, NULL);
+        if (len <= 1) return ".ghost_ai_license.json";
+        std::string s(len - 1, 0);
+        WideCharToMultiByte(CP_UTF8, 0, wp.c_str(), -1, &s[0], len, NULL, NULL);
+        return s;
     }
 }
 
@@ -132,7 +141,7 @@ bool saveLicense(const std::string& key) {
     auto hwidKey = Crypto::hexToBytes(optData->hwid_hash);
     auto encrypted = Crypto::xorCipher(rawBytes, hwidKey);
 
-    std::string path = getLicenseFilePath();
+    std::wstring path = getLicenseFilePathW();
     std::ofstream ofs(path, std::ios::binary);
     if (!ofs.is_open()) return false;
 
@@ -141,7 +150,7 @@ bool saveLicense(const std::string& key) {
 }
 
 std::optional<LicenseData> loadLicense() {
-    std::string path = getLicenseFilePath();
+    std::wstring path = getLicenseFilePathW();
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs.is_open()) return std::nullopt;
 
@@ -171,8 +180,8 @@ std::optional<LicenseData> loadLicense() {
 }
 
 void clearLicense() {
-    std::string path = getLicenseFilePath();
-    DeleteFileA(path.c_str());
+    std::wstring path = getLicenseFilePathW();
+    DeleteFileW(path.c_str());
 }
 
 std::string formatLicenseInfo(const LicenseData& data) {

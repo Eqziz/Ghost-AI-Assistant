@@ -106,9 +106,14 @@ namespace {
                 wchar_t keyBuf[512] = { 0 };
                 GetWindowTextW(s_keyEdit, keyBuf, 512);
 
-                int len = WideCharToMultiByte(CP_UTF8, 0, keyBuf, -1, NULL, 0, NULL, NULL);
-                std::string key(len - 1, 0);
-                WideCharToMultiByte(CP_UTF8, 0, keyBuf, -1, &key[0], len, NULL, NULL);
+                std::string key;
+                if (keyBuf[0] != L'\0') {
+                    int len = WideCharToMultiByte(CP_UTF8, 0, keyBuf, -1, NULL, 0, NULL, NULL);
+                    if (len > 1) {
+                        key.resize(len - 1);
+                        WideCharToMultiByte(CP_UTF8, 0, keyBuf, -1, &key[0], len, NULL, NULL);
+                    }
+                }
 
                 while (!key.empty() && (key.front() == ' ' || key.front() == '\t')) key.erase(key.begin());
                 while (!key.empty() && (key.back() == ' ' || key.back() == '\t')) key.pop_back();
@@ -162,14 +167,17 @@ std::optional<LicenseData> ActivationUI::showActivationDialog() {
     HINSTANCE hInstance = GetModuleHandle(NULL);
     const wchar_t* CLASS_NAME = L"GhostAI_ActivationClass";
 
-    WNDCLASSEXW wc = { 0 };
-    wc.cbSize = sizeof(WNDCLASSEXW);
-    wc.lpfnWndProc = ActivationWndProc;
-    wc.hInstance = hInstance;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.lpszClassName = CLASS_NAME;
-    wc.hbrBackground = CreateSolidBrush(RGB(30, 30, 30));
-    RegisterClassExW(&wc);
+    WNDCLASSEXW existingWc = { 0 };
+    if (!GetClassInfoExW(hInstance, CLASS_NAME, &existingWc)) {
+        WNDCLASSEXW wc = { 0 };
+        wc.cbSize = sizeof(WNDCLASSEXW);
+        wc.lpfnWndProc = ActivationWndProc;
+        wc.hInstance = hInstance;
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        wc.lpszClassName = CLASS_NAME;
+        wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+        RegisterClassExW(&wc);
+    }
 
     int winW = 530;
     int winH = 340;

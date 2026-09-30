@@ -29,6 +29,7 @@ private:
     AppConfig m_config;
     std::string m_mode;
     std::atomic<bool> m_running{ true };
+    std::atomic<bool> m_isProcessing{ false };
 
     std::unique_ptr<GhostUI> m_ui;
     std::unique_ptr<ConversationMemory> m_memory;

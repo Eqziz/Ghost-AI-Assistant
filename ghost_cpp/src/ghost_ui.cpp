@@ -49,11 +49,11 @@ GhostUI::GhostUI(double alpha, double alphaMin, double alphaMax, const std::stri
     // Установка прозрачности
     SetLayeredWindowAttributes(m_hwnd, 0, (BYTE)(m_alpha * 255.0), LWA_ALPHA);
 
-    // Шрифт Consolas
-    m_font = CreateFontA(
+    // Шрифт Consolas (Unicode)
+    m_font = CreateFontW(
         16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas"
+        CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas"
     );
 
     if (m_mode == "hard") {
@@ -71,8 +71,13 @@ GhostUI::~GhostUI() {
 
 void GhostUI::destroy() {
     if (m_hwnd) {
-        DestroyWindow(m_hwnd);
-        m_hwnd = NULL;
+        DWORD winThreadId = GetWindowThreadProcessId(m_hwnd, NULL);
+        if (winThreadId != GetCurrentThreadId()) {
+            PostMessage(m_hwnd, WM_CLOSE, 0, 0);
+        } else {
+            DestroyWindow(m_hwnd);
+            m_hwnd = NULL;
+        }
     }
     if (m_font) {
         DeleteObject(m_font);
@@ -122,7 +127,13 @@ bool GhostUI::toggleFollow() {
 }
 
 void GhostUI::setPosition(int x, int y) {
-    if (!m_isFollowing || m_isInvisible || !m_hwnd) return;
+    if (!m_hwnd) return;
+    int screenW = GetSystemMetrics(SM_CXSCREEN);
+    int screenH = GetSystemMetrics(SM_CYSCREEN);
+    if (x + m_width > screenW) x = screenW - m_width - 5;
+    if (y + m_height > screenH) y = screenH - m_height - 5;
+    if (x < 0) x = 5;
+    if (y < 0) y = 5;
     SetWindowPos(m_hwnd, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
@@ -171,6 +182,7 @@ bool GhostUI::setClickthrough(bool enabled) {
         exStyle &= ~WS_EX_TRANSPARENT;
     }
     SetWindowLongPtr(m_hwnd, GWL_EXSTYLE, exStyle);
+    SetWindowPos(m_hwnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
     m_isClickthrough = enabled;
     return true;
 }
@@ -236,7 +248,7 @@ void GhostUI::onPaint(HDC hdc) {
     SelectObject(memDC, oldPen);
     DeleteObject(borderPen);
 
-    // Текст
+    // Текст (Unicode / UTF-8 поддержка)
     HFONT oldFont = (HFONT)SelectObject(memDC, m_font);
     SetBkMode(memDC, TRANSPARENT);
     SetTextColor(memDC, RGB(235, 235, 235));
@@ -247,13 +259,19 @@ void GhostUI::onPaint(HDC hdc) {
     textRc.right -= 8;
     textRc.bottom -= (GRIP_SIZE + 4);
 
-    std::string textToDraw;
+    std::wstring textToDrawW;
     {
         std::lock_guard<std::mutex> lock(m_uiMutex);
-        textToDraw = m_text;
+        if (!m_text.empty()) {
+            int len = MultiByteToWideChar(CP_UTF8, 0, m_text.c_str(), -1, NULL, 0);
+            if (len > 0) {
+                textToDrawW.resize(len - 1);
+                MultiByteToWideChar(CP_UTF8, 0, m_text.c_str(), -1, &textToDrawW[0], len);
+            }
+        }
     }
 
-    DrawTextA(memDC, textToDraw.c_str(), -1, &textRc, DT_LEFT | DT_TOP | DT_WORDBREAK);
+    DrawTextW(memDC, textToDrawW.c_str(), -1, &textRc, DT_LEFT | DT_TOP | DT_WORDBREAK);
 
     // Grip в правом нижнем углу
     HBRUSH gripBrush = CreateSolidBrush(RGB(60, 60, 60));
@@ -360,8 +378,12 @@ LRESULT CALLBACK GhostUI::WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
         }
         return 0;
     }
+    case WM_CLOSE:
+        DestroyWindow(hwnd);
+        return 0;
 
     case WM_DESTROY:
+        SetWindowLongPtr(hwnd, GWLP_USERDATA, 0);
         PostQuitMessage(0);
         return 0;
     }

@@ -285,7 +285,11 @@ namespace {
 
                 std::string pairsStr = getControlText(s_edMaxPairs);
                 if (!pairsStr.empty()) {
-                    cfg.max_context_pairs = std::stoi(pairsStr);
+                    try {
+                        cfg.max_context_pairs = (std::max)(0, std::stoi(pairsStr));
+                    } catch (...) {
+                        cfg.max_context_pairs = 10;
+                    }
                 }
                 cfg.persist_context = (SendMessage(s_chkPersistCtx, BM_GETCHECK, 0, 0) == BST_CHECKED);
                 cfg.include_images_in_context = (SendMessage(s_chkCtxImages, BM_GETCHECK, 0, 0) == BST_CHECKED);
@@ -319,14 +323,17 @@ std::optional<AppConfig> SetupUI::showSetupDialog(const AppConfig& initialConfig
     HINSTANCE hInstance = GetModuleHandle(NULL);
     const wchar_t* CLASS_NAME = L"GhostAI_SetupDialogClass";
 
-    WNDCLASSEXW wc = { 0 };
-    wc.cbSize = sizeof(WNDCLASSEXW);
-    wc.lpfnWndProc = SetupWndProc;
-    wc.hInstance = hInstance;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.lpszClassName = CLASS_NAME;
-    wc.hbrBackground = CreateSolidBrush(RGB(30, 30, 30));
-    RegisterClassExW(&wc);
+    WNDCLASSEXW existingWc = { 0 };
+    if (!GetClassInfoExW(hInstance, CLASS_NAME, &existingWc)) {
+        WNDCLASSEXW wc = { 0 };
+        wc.cbSize = sizeof(WNDCLASSEXW);
+        wc.lpfnWndProc = SetupWndProc;
+        wc.hInstance = hInstance;
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        wc.lpszClassName = CLASS_NAME;
+        wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+        RegisterClassExW(&wc);
+    }
 
     int winW = 590;
     int winH = 710;

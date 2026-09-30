@@ -10,12 +10,23 @@
 #include <sstream>
 #include <algorithm>
 
-std::string ConversationMemory::getContextFilePath() {
-    char userProfile[MAX_PATH];
-    if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
-        return std::string(userProfile) + "\\.ghost_ai_context.json";
+namespace {
+    std::wstring getContextFilePathW() {
+        wchar_t userProfile[MAX_PATH];
+        if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
+            return std::wstring(userProfile) + L"\\.ghost_ai_context.json";
+        }
+        return L".ghost_ai_context.json";
     }
-    return ".ghost_ai_context.json";
+}
+
+std::string ConversationMemory::getContextFilePath() {
+    std::wstring wp = getContextFilePathW();
+    int len = WideCharToMultiByte(CP_UTF8, 0, wp.c_str(), -1, NULL, 0, NULL, NULL);
+    if (len <= 1) return ".ghost_ai_context.json";
+    std::string s(len - 1, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wp.c_str(), -1, &s[0], len, NULL, NULL);
+    return s;
 }
 
 nlohmann::json Turn::toJson() const {
@@ -128,7 +139,7 @@ void ConversationMemory::save() {
         }
         j["turns"] = turnsJson;
 
-        std::string path = getContextFilePath();
+        std::wstring path = getContextFilePathW();
         std::ofstream ofs(path, std::ios::trunc);
         if (ofs.is_open()) {
             ofs << j.dump(2);
@@ -137,7 +148,8 @@ void ConversationMemory::save() {
 }
 
 void ConversationMemory::load() {
-    std::string path = getContextFilePath();
+    if (m_max_pairs <= 0) return;
+    std::wstring path = getContextFilePathW();
     std::ifstream ifs(path);
     if (!ifs.is_open()) return;
 

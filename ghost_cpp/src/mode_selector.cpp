@@ -95,14 +95,17 @@ std::string ModeSelector::selectMode() {
     HINSTANCE hInstance = GetModuleHandle(NULL);
     const wchar_t* CLASS_NAME = L"GhostAI_ModeSelectorClass";
 
-    WNDCLASSEXW wc = { 0 };
-    wc.cbSize = sizeof(WNDCLASSEXW);
-    wc.lpfnWndProc = ModeSelectorWndProc;
-    wc.hInstance = hInstance;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.lpszClassName = CLASS_NAME;
-    wc.hbrBackground = CreateSolidBrush(RGB(30, 30, 30));
-    RegisterClassExW(&wc);
+    WNDCLASSEXW existingWc = { 0 };
+    if (!GetClassInfoExW(hInstance, CLASS_NAME, &existingWc)) {
+        WNDCLASSEXW wc = { 0 };
+        wc.cbSize = sizeof(WNDCLASSEXW);
+        wc.lpfnWndProc = ModeSelectorWndProc;
+        wc.hInstance = hInstance;
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        wc.lpszClassName = CLASS_NAME;
+        wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+        RegisterClassExW(&wc);
+    }
 
     int winW = 396;
     int winH = 250;

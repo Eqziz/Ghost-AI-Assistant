@@ -113,7 +113,9 @@ void GhostAssistant::startHardwarePolling() {
         while (m_running) {
             if (GetAsyncKeyState(VK_F2_KEY) & 0x8000) {
                 std::thread(&GhostAssistant::processScreen, this).detach();
-                std::this_thread::sleep_for(std::chrono::milliseconds(400));
+                while ((GetAsyncKeyState(VK_F2_KEY) & 0x8000) && m_running) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                }
             }
 
             if (GetAsyncKeyState(VK_END_KEY) & 0x8000) {
@@ -140,12 +142,25 @@ void GhostAssistant::startPositionLoop() {
 }
 
 void GhostAssistant::processScreen() {
+    bool expected = false;
+    if (!m_isProcessing.compare_exchange_strong(expected, true)) {
+        return;
+    }
+
+    struct ProcessingGuard {
+        std::atomic<bool>& flag;
+        ~ProcessingGuard() { flag = false; }
+    } guard{ m_isProcessing };
+
     auto lic = LicenseManager::loadLicense();
     if (!lic || lic->isExpired()) {
-        m_ui->log("[Лицензия повреждена]");
+        m_ui->log("[Лицензия повреждена или истекла]");
         m_ui->setState(WindowState::ERROR_STATE);
         return;
     }
+
+    POINT captureCursorPos;
+    GetCursorPos(&captureCursorPos);
 
     if (m_mode == "light") {
         m_ui->log("Анализирую...");
@@ -159,11 +174,7 @@ void GhostAssistant::processScreen() {
         if (m_mode == "hard") {
             // Снимок всего экрана целиком
             imageB64 = ScreenCapture::captureToBase64Jpeg(-1, -1, -1, -1, 85);
-
-            // Перемещение окна к мыши
-            POINT pt;
-            GetCursorPos(&pt);
-            m_ui->setPosition(pt.x + 15, pt.y + 15);
+            m_ui->setPosition(captureCursorPos.x + 15, captureCursorPos.y + 15);
         } else {
             // Light Mode: захват области вокруг окна
             int x, y, w, h;
@@ -174,6 +185,7 @@ void GhostAssistant::processScreen() {
         std::string answer = m_client->analyze(imageB64);
 
         if (m_mode == "hard") {
+            m_ui->setPosition(captureCursorPos.x + 15, captureCursorPos.y + 15);
             m_ui->showHardResponse(answer, 6.0);
         } else {
             m_ui->log(answer);
@@ -196,10 +208,10 @@ void GhostAssistant::killApp() {
 void GhostAssistant::shutdown() {
     m_running = false;
     if (m_hardwarePollThread.joinable()) {
-        m_hardwarePollThread.detach();
+        m_hardwarePollThread.join();
     }
     if (m_positionThread.joinable()) {
-        m_positionThread.detach();
+        m_positionThread.join();
     }
     if (m_binder) {
         m_binder->unregisterAll();

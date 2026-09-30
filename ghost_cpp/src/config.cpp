@@ -5,12 +5,23 @@
 #include <fstream>
 #include <iostream>
 
-std::string AppConfig::getConfigFilePath() {
-    char userProfile[MAX_PATH];
-    if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
-        return std::string(userProfile) + "\\.ghost_ai_config.json";
+namespace {
+    std::wstring getConfigFilePathW() {
+        wchar_t userProfile[MAX_PATH];
+        if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
+            return std::wstring(userProfile) + L"\\.ghost_ai_config.json";
+        }
+        return L".ghost_ai_config.json";
     }
-    return ".ghost_ai_config.json";
+}
+
+std::string AppConfig::getConfigFilePath() {
+    std::wstring wp = getConfigFilePathW();
+    int len = WideCharToMultiByte(CP_UTF8, 0, wp.c_str(), -1, NULL, 0, NULL, NULL);
+    if (len <= 1) return ".ghost_ai_config.json";
+    std::string s(len - 1, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wp.c_str(), -1, &s[0], len, NULL, NULL);
+    return s;
 }
 
 nlohmann::json AppConfig::toJson() const {
@@ -91,7 +102,7 @@ bool AppConfig::save() const {
         plain["_secrets"] = Crypto::encryptDict(secrets);
         plain["openrouter_api_key"] = "";
 
-        std::string path = getConfigFilePath();
+        std::wstring path = getConfigFilePathW();
         std::ofstream ofs(path, std::ios::trunc);
         if (!ofs.is_open()) return false;
         ofs << plain.dump(2);
@@ -102,7 +113,7 @@ bool AppConfig::save() const {
 }
 
 AppConfig AppConfig::load() {
-    std::string path = getConfigFilePath();
+    std::wstring path = getConfigFilePathW();
     std::ifstream ifs(path);
     if (!ifs.is_open()) {
         return AppConfig();

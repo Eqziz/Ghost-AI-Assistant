@@ -21,8 +21,26 @@ VisionClient::VisionClient(const AppConfig& config, ConversationMemory& memory)
     : m_config(config), m_memory(memory)
 {}
 
+namespace {
+    struct WinHttpHandle {
+        HINTERNET handle = NULL;
+        WinHttpHandle(HINTERNET h = NULL) : handle(h) {}
+        ~WinHttpHandle() { if (handle) WinHttpCloseHandle(handle); }
+        operator HINTERNET() const { return handle; }
+        WinHttpHandle& operator=(HINTERNET h) {
+            if (handle) WinHttpCloseHandle(handle);
+            handle = h;
+            return *this;
+        }
+    };
+}
+
 std::string VisionClient::httpPost(const std::string& url, const std::string& jsonPayload, const std::string& authHeader, int timeoutSec) {
-    std::wstring wUrl = toWide(url);
+    std::string fullUrl = url;
+    if (fullUrl.rfind("http://", 0) != 0 && fullUrl.rfind("https://", 0) != 0) {
+        fullUrl = "http://" + fullUrl;
+    }
+    std::wstring wUrl = toWide(fullUrl);
 
     URL_COMPONENTS urlComp = { 0 };
     urlComp.dwStructSize = sizeof(urlComp);
@@ -32,7 +50,7 @@ std::string VisionClient::httpPost(const std::string& url, const std::string& js
     urlComp.dwExtraInfoLength = (DWORD)-1;
 
     if (!WinHttpCrackUrl(wUrl.c_str(), (DWORD)wUrl.length(), 0, &urlComp)) {
-        throw std::runtime_error("WinHttpCrackUrl failed");
+        throw std::runtime_error("WinHttpCrackUrl failed: " + url);
     }
 
     std::wstring hostName(urlComp.lpszHostName, urlComp.dwHostNameLength);
@@ -43,7 +61,7 @@ std::string VisionClient::httpPost(const std::string& url, const std::string& js
     bool isHttps = (urlComp.nScheme == INTERNET_SCHEME_HTTPS);
     INTERNET_PORT port = urlComp.nPort;
 
-    HINTERNET hSession = WinHttpOpen(L"Ghost-AI/2.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    WinHttpHandle hSession = WinHttpOpen(L"Ghost-AI/2.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) {
         throw std::runtime_error("WinHttpOpen failed");
     }
@@ -51,21 +69,18 @@ std::string VisionClient::httpPost(const std::string& url, const std::string& js
     DWORD timeoutMs = static_cast<DWORD>(timeoutSec * 1000);
     WinHttpSetTimeouts(hSession, timeoutMs, timeoutMs, timeoutMs, timeoutMs);
 
-    HINTERNET hConnect = WinHttpConnect(hSession, hostName.c_str(), port, 0);
+    WinHttpHandle hConnect = WinHttpConnect(hSession, hostName.c_str(), port, 0);
     if (!hConnect) {
-        WinHttpCloseHandle(hSession);
-        throw std::runtime_error("WinHttpConnect failed");
+        throw std::runtime_error("WinHttpConnect failed for host: " + fullUrl);
     }
 
     DWORD flags = isHttps ? WINHTTP_FLAG_SECURE : 0;
-    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"POST", urlPath.c_str(), NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+    WinHttpHandle hRequest = WinHttpOpenRequest(hConnect, L"POST", urlPath.c_str(), NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
     if (!hRequest) {
-        WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
         throw std::runtime_error("WinHttpOpenRequest failed");
     }
 
-    std::wstring headers = L"Content-Type: application/json\r\n";
+    std::wstring headers = L"Content-Type: application/json; charset=utf-8\r\n";
     if (!authHeader.empty()) {
         headers += toWide(authHeader) + L"\r\n";
     }
@@ -76,20 +91,14 @@ std::string VisionClient::httpPost(const std::string& url, const std::string& js
 
     if (!sendOk) {
         DWORD err = GetLastError();
-        WinHttpCloseHandle(hRequest);
-        WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
         if (err == ERROR_WINHTTP_TIMEOUT) {
-            throw std::runtime_error("Timeout");
+            throw std::runtime_error("Таймаут сетевого запроса к ИИ серверу");
         }
-        throw std::runtime_error("WinHttpSendRequest error: " + std::to_string(err));
+        throw std::runtime_error("Сетевая ошибка WinHttpSendRequest: " + std::to_string(err));
     }
 
     if (!WinHttpReceiveResponse(hRequest, NULL)) {
-        WinHttpCloseHandle(hRequest);
-        WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
-        throw std::runtime_error("WinHttpReceiveResponse failed");
+        throw std::runtime_error("Сервер не ответил (WinHttpReceiveResponse failed)");
     }
 
     DWORD statusCode = 0;
@@ -106,10 +115,6 @@ std::string VisionClient::httpPost(const std::string& url, const std::string& js
             responseBody.append(buffer.data(), bytesRead);
         }
     }
-
-    WinHttpCloseHandle(hRequest);
-    WinHttpCloseHandle(hConnect);
-    WinHttpCloseHandle(hSession);
 
     if (statusCode != 200) {
         throw std::runtime_error("HTTP " + std::to_string(statusCode) + ": " + responseBody.substr(0, 200));
@@ -158,6 +163,10 @@ std::string VisionClient::analyzeOllama(const std::string& imageBase64, const st
 
     std::string respStr = httpPost(url, payload.dump(), "", m_config.request_timeout);
     auto j = nlohmann::json::parse(respStr);
+    if (j.contains("error")) {
+        std::string err = j["error"].is_string() ? j["error"].get<std::string>() : j["error"].dump();
+        throw std::runtime_error("Ollama API: " + err);
+    }
     std::string answer = j.value("response", "");
     if (answer.empty()) {
         throw std::runtime_error("Ollama: пустой ответ");
@@ -205,6 +214,14 @@ std::string VisionClient::analyzeOpenRouter(const std::string& imageBase64, cons
     std::string respStr = httpPost(url, payload.dump(), authHeader, m_config.request_timeout);
     auto j = nlohmann::json::parse(respStr);
 
+    if (j.contains("error")) {
+        if (j["error"].is_object()) {
+            throw std::runtime_error("OpenRouter API: " + j["error"].value("message", "Неизвестная ошибка"));
+        } else if (j["error"].is_string()) {
+            throw std::runtime_error("OpenRouter API: " + j["error"].get<std::string>());
+        }
+    }
+
     std::string answer;
     try {
         auto content = j["choices"][0]["message"]["content"];
@@ -218,7 +235,7 @@ std::string VisionClient::analyzeOpenRouter(const std::string& imageBase64, cons
             }
         }
     } catch (const std::exception& e) {
-        throw std::runtime_error("OpenRouter: формат ответа: " + std::string(e.what()));
+        throw std::runtime_error("OpenRouter: некорректный ответ: " + std::string(e.what()));
     }
 
     // Trim

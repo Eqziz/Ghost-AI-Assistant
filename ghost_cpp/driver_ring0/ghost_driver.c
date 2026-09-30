@@ -18,12 +18,17 @@ ULONG GetActiveProcessLinksOffset() {
     PEPROCESS currentProcess = PsGetCurrentProcess();
     HANDLE currentPid = PsGetCurrentProcessId();
 
-    // Сканируем структуру EPROCESS в поисках нашего PID
+    // Сканируем структуру EPROCESS в поисках нашего PID с валидацией указателей LIST_ENTRY
     for (ULONG offset = 0x200; offset < 0x800; offset += sizeof(ULONG_PTR)) {
         PHANDLE pVal = (PHANDLE)((PUCHAR)currentProcess + offset);
         if (*pVal == currentPid) {
-            // В Windows NT поле ActiveProcessLinks следует сразу за UniqueProcessId
-            return offset + sizeof(ULONG_PTR);
+            ULONG candidateOffset = offset + sizeof(ULONG_PTR);
+            PLIST_ENTRY pLinks = (PLIST_ENTRY)((PUCHAR)currentProcess + candidateOffset);
+            if (pLinks->Flink != NULL && pLinks->Blink != NULL &&
+                (ULONG_PTR)pLinks->Flink > 0xFFFF000000000000ULL &&
+                (ULONG_PTR)pLinks->Blink > 0xFFFF000000000000ULL) {
+                return candidateOffset;
+            }
         }
     }
     // Стандартное смещение для современных сборок Windows 10 / 11 x64

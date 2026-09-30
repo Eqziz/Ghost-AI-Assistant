@@ -18,9 +18,13 @@ namespace {
     LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         if (nCode == HC_ACTION && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)) {
             KBDLLHOOKSTRUCT* pKbd = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
-            if (KeyBinder::handleHookEvent(pKbd->vkCode, true)) {
-                // Если обработано хоткеем
+            int vk = pKbd->vkCode;
+            if (vk == VK_CONTROL) {
+                vk = (pKbd->flags & LLKHF_EXTENDED) ? VK_RCONTROL : VK_LCONTROL;
+            } else if (vk == VK_MENU) {
+                vk = (pKbd->flags & LLKHF_EXTENDED) ? VK_RMENU : VK_LMENU;
             }
+            KeyBinder::handleHookEvent(vk, true);
         }
         return CallNextHookEx(NULL, nCode, wParam, lParam);
     }
@@ -36,8 +40,8 @@ KeyCombo KeyBinder::parseKeyCombo(const std::string& keyStr) {
     std::string token;
     std::vector<std::string> parts;
     while (std::getline(ss, token, '+')) {
-        while (!token.empty() && token.front() == ' ') token.erase(token.begin());
-        while (!token.empty() && token.back() == ' ') token.pop_back();
+        while (!token.empty() && (token.front() == ' ' || token.front() == '\t')) token.erase(token.begin());
+        while (!token.empty() && (token.back() == ' ' || token.back() == '\t')) token.pop_back();
         if (!token.empty()) {
             parts.push_back(token);
         }
@@ -63,10 +67,12 @@ KeyCombo KeyBinder::parseKeyCombo(const std::string& keyStr) {
         else if (p == "home") combo.vkCode = VK_HOME;
         else if (p == "`" || p == "~") combo.vkCode = VK_OEM_3;
         else if (p.length() >= 2 && p[0] == 'f' && isdigit(p[1])) {
-            int fnum = std::stoi(p.substr(1));
-            if (fnum >= 1 && fnum <= 24) {
-                combo.vkCode = VK_F1 + (fnum - 1);
-            }
+            try {
+                int fnum = std::stoi(p.substr(1));
+                if (fnum >= 1 && fnum <= 24) {
+                    combo.vkCode = VK_F1 + (fnum - 1);
+                }
+            } catch (...) {}
         } else if (p.length() == 1) {
             char c = p[0];
             if (c >= 'a' && c <= 'z') combo.vkCode = 'A' + (c - 'a');
@@ -74,11 +80,12 @@ KeyCombo KeyBinder::parseKeyCombo(const std::string& keyStr) {
         }
     }
 
-    // Если был указан только ctrl/shift/alt
+    // Если был указан только ctrl/shift/alt/win
     if (combo.vkCode == 0) {
         if (combo.ctrl) combo.vkCode = VK_CONTROL;
         else if (combo.shift) combo.vkCode = VK_SHIFT;
         else if (combo.alt) combo.vkCode = VK_MENU;
+        else if (combo.win) combo.vkCode = VK_LWIN;
     }
 
     return combo;
@@ -90,6 +97,7 @@ KeyBinder::KeyBinder() {
 
 KeyBinder::~KeyBinder() {
     unregisterAll();
+    uninstallHook();
 }
 
 void KeyBinder::installHook() {
@@ -129,27 +137,50 @@ bool KeyBinder::handleHookEvent(int vkCode, bool isDown) {
     bool isCtrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
     bool isShift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     bool isAlt = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+    bool isWin = ((GetAsyncKeyState(VK_LWIN) & 0x8000) != 0) || ((GetAsyncKeyState(VK_RWIN) & 0x8000) != 0);
 
     std::vector<std::function<void()>> callbacksToRun;
     {
         std::lock_guard<std::mutex> lock(s_keyMutex);
         for (const auto& [action, pair] : s_bindings) {
             const KeyCombo& kc = pair.first;
-            if (kc.vkCode == vkCode) {
-                // Проверяем модификаторы
-                if (kc.ctrl && !isCtrl && vkCode != VK_CONTROL && vkCode != VK_LCONTROL && vkCode != VK_RCONTROL) continue;
-                if (kc.shift && !isShift && vkCode != VK_SHIFT) continue;
-                if (kc.alt && !isAlt && vkCode != VK_MENU) continue;
+            if (kc.vkCode == 0) continue;
 
-                if (pair.second) {
-                    callbacksToRun.push_back(pair.second);
-                }
+            // Проверяем совпадение базовой клавиши
+            bool keyMatches = (kc.vkCode == vkCode) ||
+                (kc.vkCode == VK_CONTROL && (vkCode == VK_LCONTROL || vkCode == VK_RCONTROL)) ||
+                (kc.vkCode == VK_MENU && (vkCode == VK_LMENU || vkCode == VK_RMENU)) ||
+                (kc.vkCode == VK_SHIFT && (vkCode == VK_LSHIFT || vkCode == VK_RSHIFT));
+
+            if (!keyMatches) continue;
+
+            // Проверяем модификаторы, только если сама клавиша не является этим модификатором
+            bool needCtrl = kc.ctrl && (kc.vkCode != VK_CONTROL && kc.vkCode != VK_LCONTROL && kc.vkCode != VK_RCONTROL);
+            bool hasCtrl = isCtrl && (vkCode != VK_CONTROL && vkCode != VK_LCONTROL && vkCode != VK_RCONTROL);
+            if (needCtrl != hasCtrl) continue;
+
+            bool needShift = kc.shift && (kc.vkCode != VK_SHIFT && kc.vkCode != VK_LSHIFT && kc.vkCode != VK_RSHIFT);
+            bool hasShift = isShift && (vkCode != VK_SHIFT && vkCode != VK_LSHIFT && vkCode != VK_RSHIFT);
+            if (needShift != hasShift) continue;
+
+            bool needAlt = kc.alt && (kc.vkCode != VK_MENU && kc.vkCode != VK_LMENU && kc.vkCode != VK_RMENU);
+            bool hasAlt = isAlt && (vkCode != VK_MENU && vkCode != VK_LMENU && vkCode != VK_RMENU);
+            if (needAlt != hasAlt) continue;
+
+            bool needWin = kc.win && (kc.vkCode != VK_LWIN && kc.vkCode != VK_RWIN);
+            bool hasWin = isWin && (vkCode != VK_LWIN && vkCode != VK_RWIN);
+            if (needWin != hasWin) continue;
+
+            if (pair.second) {
+                callbacksToRun.push_back(pair.second);
             }
         }
     }
 
     for (auto& cb : callbacksToRun) {
-        cb();
+        try {
+            cb();
+        } catch (...) {}
     }
     return !callbacksToRun.empty();
 }

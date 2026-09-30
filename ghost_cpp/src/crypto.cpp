@@ -84,7 +84,11 @@ static const char b64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstu
 
 std::string base64Encode(const uint8_t* data, size_t size) {
     std::string out;
-    int val = 0, valb = -6;
+    if (!data || size == 0) return out;
+    out.reserve(((size + 2) / 3) * 4);
+
+    uint32_t val = 0;
+    int valb = -6;
     for (size_t i = 0; i < size; ++i) {
         val = (val << 8) + data[i];
         valb += 8;
@@ -92,9 +96,14 @@ std::string base64Encode(const uint8_t* data, size_t size) {
             out.push_back(b64_table[(val >> valb) & 0x3F]);
             valb -= 6;
         }
+        val &= 0x3F;
     }
-    if (valb > -6) out.push_back(b64_table[((val << 8) >> (valb + 8)) & 0x3F]);
-    while (out.size() % 4) out.push_back('=');
+    if (valb > -6) {
+        out.push_back(b64_table[((val << 8) >> (valb + 8)) & 0x3F]);
+    }
+    while (out.size() % 4) {
+        out.push_back('=');
+    }
     return out;
 }
 
@@ -104,17 +113,24 @@ std::string base64Encode(const std::vector<uint8_t>& data) {
 
 std::vector<uint8_t> base64Decode(const std::string& input) {
     std::vector<int> T(256, -1);
-    for (int i = 0; i < 64; i++) T[(unsigned char)b64_table[i]] = i;
+    for (int i = 0; i < 64; i++) T[static_cast<unsigned char>(b64_table[i])] = i;
 
     std::vector<uint8_t> out;
-    int val = 0, valb = -8;
+    out.reserve(input.size() * 3 / 4);
+
+    uint32_t val = 0;
+    int valb = -8;
     for (unsigned char c : input) {
-        if (T[c] == -1) break;
+        if (c == ' ' || c == '\r' || c == '\n' || c == '\t') continue;
+        if (c == '=') break;
+        if (T[c] == -1) continue;
+
         val = (val << 6) + T[c];
         valb += 6;
         if (valb >= 0) {
-            out.push_back(uint8_t((val >> valb) & 0xFF));
+            out.push_back(static_cast<uint8_t>((val >> valb) & 0xFF));
             valb -= 8;
+            val &= 0x3F;
         }
     }
     return out;
