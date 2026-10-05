@@ -52,14 +52,34 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 0;
     }
 
-    // 7. Подключение к Ring 0 драйверу (если загружен) для DKOM скрытия процесса
-    if (DriverClient::instance().isConnected()) {
-        DriverClient::instance().hideProcess();
+    // 7. Подключение к Ring 0 драйверу (если загружен)
+    try {
+        auto& driver = DriverClient::instance();
+        if (driver.connect()) {
+            // ObRegisterCallbacks — безопасная защита (ВСЕГДА, без DKOM)
+            driver.protectProcess();
+
+            // Временный DKOM — только в Hard Mode, на 5 секунд с автовозвратом
+            if (mode == "hard") {
+                driver.hideProcessTimed(0, 5000);
+            }
+        }
+    } catch (...) {
+        // Драйвер недоступен — работаем без Ring 0
     }
 
     // 8. Запуск главного ассистента
     GhostAssistant app(*updatedCfg, mode);
     app.run();
+
+    // Отключение драйвера и снятие защиты
+    try {
+        auto& driver = DriverClient::instance();
+        if (driver.isConnected()) {
+            driver.unprotectProcess();
+            driver.disconnect();
+        }
+    } catch (...) {}
 
     ScreenCapture::shutdown();
     return 0;

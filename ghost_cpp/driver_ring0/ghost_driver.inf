@@ -1,5 +1,10 @@
 ;
 ; ghost_driver.inf — INF-файл установки Ring 0 драйвера Ghost-AI
+; Совместимость: Windows 10 x64 / Windows 11 x64 (включая 24H2)
+;
+; Для тестовой загрузки без INF (test signing mode):
+;   sc create GhostDriver type=kernel binPath="C:\path\to\ghost_driver.sys"
+;   sc start  GhostDriver
 ;
 
 [Version]
@@ -12,7 +17,7 @@ DriverVer   = 09/30/2026,1.0.0.0
 PnpLockdown = 1
 
 [DestinationDirs]
-DefaultDestDir = 12 ; %windir%\system32\drivers
+DefaultDestDir = 13        ; Driver Store (Win10 1709+ / Win11)
 
 [SourceDisksNames]
 1 = %DiskName%,,,""
@@ -34,7 +39,7 @@ DisplayName    = %ServiceDesc%
 ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
 StartType      = 3               ; SERVICE_DEMAND_START
 ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
-ServiceBinary  = %12%\ghost_driver.sys
+ServiceBinary  = %13%\ghost_driver.sys
 
 [Strings]
 ManufacturerName = "GhostAI Security Research"

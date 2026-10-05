@@ -128,12 +128,6 @@ bool GhostUI::toggleFollow() {
 
 void GhostUI::setPosition(int x, int y) {
     if (!m_hwnd) return;
-    int screenW = GetSystemMetrics(SM_CXSCREEN);
-    int screenH = GetSystemMetrics(SM_CYSCREEN);
-    if (x + m_width > screenW) x = screenW - m_width - 5;
-    if (y + m_height > screenH) y = screenH - m_height - 5;
-    if (x < 0) x = 5;
-    if (y < 0) y = 5;
     SetWindowPos(m_hwnd, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
