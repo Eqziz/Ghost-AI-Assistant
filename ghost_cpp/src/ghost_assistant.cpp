@@ -10,7 +10,7 @@ GhostAssistant::GhostAssistant(AppConfig config, const std::string& mode)
         m_config.system_prompt =
             "Ты экзаменационный солвер. Твоя задача — дать ТОЛЬКО финальный ответ. "
             "Выведи исключительно букву правильного варианта (A, B, C, D), конкретное число "
-            "или термин. Любые пояснения, вводные фразы, рассуждения и оформление СТРОГО запрещены. "
+            "или термин. Любые пояснения, вводные фразы и оформление СТРОГО запрещены. "
             "Ответ должен состоять максимум из 1-3 слов.";
         m_config.user_prompt = "Найди текущий вопрос на экране и напиши только ответ.";
     }
@@ -43,7 +43,14 @@ GhostAssistant::GhostAssistant(AppConfig config, const std::string& mode)
 
     std::string ctxStatus = m_memory->isEnabled() ?
         (std::to_string(m_memory->size()) + "/" + std::to_string(m_config.max_context_pairs) + " пар") : "выключен";
-    m_ui->log("👻 Готов [" + (m_mode == "hard" ? std::string("HARD") : std::string("LIGHT")) + "]. Контекст: " + ctxStatus);
+
+    if (m_mode == "hard") {
+        m_ui->log("👻 Готов [HARD]\n[F2] Скриншот  |  [End] Выход");
+    } else {
+        std::string scKey = m_config.hotkeys.count("screenshot") ? m_config.hotkeys.at("screenshot") : "esc";
+        std::string invKey = m_config.visibility_keys.count("toggle_invisible") ? m_config.visibility_keys.at("toggle_invisible") : "ctrl+shift+h";
+        m_ui->log("👻 Готов [LIGHT]\n📸 " + scKey + " — Скриншот\n👻 " + invKey + " — Скрыть/показать\nКонтекст: " + ctxStatus);
+    }
 }
 
 GhostAssistant::~GhostAssistant() {
@@ -65,7 +72,6 @@ void GhostAssistant::setupHotkeys() {
 
         m_binder->registerHotkey("reset", m_config.hotkeys["reset"], [this]() {
             m_capture->reset();
-            m_ui->log("🔄 Размер UI сброшен");
         });
 
         // Клавиши размера окна
@@ -77,23 +83,32 @@ void GhostAssistant::setupHotkeys() {
             else if (action == "shrink_up") m_binder->registerHotkey(action, key, [this]() { m_capture->shrinkUp(); });
             else if (action == "expand_all") m_binder->registerHotkey(action, key, [this]() { m_capture->expandAll(); });
             else if (action == "shrink_all") m_binder->registerHotkey(action, key, [this]() { m_capture->shrinkAll(); });
-            else if (action == "reset_capture") m_binder->registerHotkey(action, key, [this]() { m_capture->resetCapture(); });
+            else if (action == "reset_capture") m_binder->registerHotkey(action, key, [this]() {
+                m_capture->resetCapture();
+            });
         }
 
         // Клавиши видимости
         for (const auto& [action, key] : m_config.visibility_keys) {
             if (key.empty()) continue;
-            if (action == "increase_alpha") m_binder->registerHotkey(action, key, [this]() { m_ui->adjustAlpha(+m_config.alpha_step); });
-            else if (action == "decrease_alpha") m_binder->registerHotkey(action, key, [this]() { m_ui->adjustAlpha(-m_config.alpha_step); });
-            else if (action == "toggle_clickthrough") m_binder->registerHotkey(action, key, [this]() { m_ui->toggleClickthrough(); });
-            else if (action == "toggle_invisible") m_binder->registerHotkey(action, key, [this]() { m_ui->toggleInvisible(); });
+            if (action == "increase_alpha") m_binder->registerHotkey(action, key, [this]() {
+                m_ui->adjustAlpha(+m_config.alpha_step);
+            });
+            else if (action == "decrease_alpha") m_binder->registerHotkey(action, key, [this]() {
+                m_ui->adjustAlpha(-m_config.alpha_step);
+            });
+            else if (action == "toggle_clickthrough") m_binder->registerHotkey(action, key, [this]() {
+                m_ui->toggleClickthrough();
+            });
+            else if (action == "toggle_invisible") m_binder->registerHotkey(action, key, [this]() {
+                m_ui->toggleInvisible();
+            });
         }
 
         // Сброс контекста и Kill switch
         if (!m_config.reset_context_key.empty()) {
             m_binder->registerHotkey("reset_context", m_config.reset_context_key, [this]() {
                 m_memory->clear();
-                m_ui->log("🧹 Контекст очищен");
             });
         }
 

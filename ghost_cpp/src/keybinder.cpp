@@ -65,6 +65,21 @@ KeyCombo KeyBinder::parseKeyCombo(const std::string& keyStr) {
         else if (p == "right") combo.vkCode = VK_RIGHT;
         else if (p == "end") combo.vkCode = VK_END;
         else if (p == "home") combo.vkCode = VK_HOME;
+        else if (p == "pageup" || p == "page up" || p == "prior") combo.vkCode = VK_PRIOR;
+        else if (p == "pagedown" || p == "page down" || p == "next") combo.vkCode = VK_NEXT;
+        else if (p == "insert" || p == "ins") combo.vkCode = VK_INSERT;
+        else if (p == "delete" || p == "del") combo.vkCode = VK_DELETE;
+        else if (p == "backspace" || p == "back") combo.vkCode = VK_BACK;
+        else if (p == "+" || p == "plus" || p == "add") combo.vkCode = VK_OEM_PLUS;
+        else if (p == "-" || p == "minus" || p == "sub" || p == "subtract") combo.vkCode = VK_OEM_MINUS;
+        else if (p == "[" || p == "{") combo.vkCode = VK_OEM_4;
+        else if (p == "]" || p == "}") combo.vkCode = VK_OEM_6;
+        else if (p == ";" || p == ":") combo.vkCode = VK_OEM_1;
+        else if (p == "'" || p == "\"") combo.vkCode = VK_OEM_7;
+        else if (p == "," || p == "<") combo.vkCode = VK_OEM_COMMA;
+        else if (p == "." || p == ">") combo.vkCode = VK_OEM_PERIOD;
+        else if (p == "/" || p == "?") combo.vkCode = VK_OEM_2;
+        else if (p == "\\" || p == "|") combo.vkCode = VK_OEM_5;
         else if (p == "`" || p == "~") combo.vkCode = VK_OEM_3;
         else if (p.length() >= 2 && p[0] == 'f' && isdigit(p[1])) {
             try {
@@ -78,6 +93,11 @@ KeyCombo KeyBinder::parseKeyCombo(const std::string& keyStr) {
             if (c >= 'a' && c <= 'z') combo.vkCode = 'A' + (c - 'a');
             else if (c >= '0' && c <= '9') combo.vkCode = '0' + (c - '0');
         }
+    }
+
+    // Обработка синтаксиса "ctrl++" или "+" где '+' был разделителем
+    if (combo.vkCode == 0 && (s == "+" || s.find("++") != std::string::npos || (s.length() > 1 && s.back() == '+' && s[s.length() - 2] == '+'))) {
+        combo.vkCode = VK_OEM_PLUS;
     }
 
     // Если был указан только ctrl/shift/alt/win

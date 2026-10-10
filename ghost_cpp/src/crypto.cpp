@@ -161,18 +161,20 @@ std::vector<uint8_t> getMachineKey() {
     char node[MAX_COMPUTERNAME_LENGTH + 1] = { 0 };
     DWORD nodeSize = sizeof(node);
     GetComputerNameA(node, &nodeSize);
+    node[MAX_COMPUTERNAME_LENGTH] = '\0';
 
     SYSTEM_INFO si;
     GetNativeSystemInfo(&si);
     std::string arch = (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64) ? "AMD64" : "x86";
 
     char proc[256] = { 0 };
-    DWORD procSize = sizeof(proc);
+    DWORD procSize = sizeof(proc) - 1;
     HKEY hKey;
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
         RegQueryValueExA(hKey, "ProcessorNameString", nullptr, nullptr, (LPBYTE)proc, &procSize);
         RegCloseKey(hKey);
     }
+    proc[255] = '\0';
 
     std::string machineStr = std::string(node) + "|" + arch + "|" + std::string(proc);
     return sha256(machineStr);

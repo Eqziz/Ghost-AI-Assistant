@@ -1,6 +1,6 @@
-^C:\USERS\NODIR\DESKTOP\PROJECT 2\GHOST_CPP\CMAKELISTS.TXT
+^C:\USERS\NODIR\DESKTOP\MY_PROJECTS\PROJECT 2\GHOST_CPP\CMAKELISTS.TXT
 setlocal
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" "-SC:/Users/nodir/Desktop/project 2/ghost_cpp" "-BC:/Users/nodir/Desktop/project 2/ghost_cpp/build" --check-stamp-file "C:/Users/nodir/Desktop/project 2/ghost_cpp/build/CMakeFiles/generate.stamp"
+"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" "-SC:/Users/nodir/Desktop/my_projects/project 2/ghost_cpp" "-BC:/Users/nodir/Desktop/my_projects/project 2/ghost_cpp/build" --check-stamp-file "C:/Users/nodir/Desktop/my_projects/project 2/ghost_cpp/build/CMakeFiles/generate.stamp"
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone

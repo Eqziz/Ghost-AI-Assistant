@@ -1,58 +1,58 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <ClCompile Include="C:\Users\nodir\Desktop\project 2\ghost_cpp\src\anti_analysis.cpp">
+    <ClCompile Include="C:\Users\nodir\Desktop\my_projects\project 2\ghost_cpp\src\anti_analysis.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\nodir\Desktop\project 2\ghost_cpp\src\crypto.cpp">
+    <ClCompile Include="C:\Users\nodir\Desktop\my_projects\project 2\ghost_cpp\src\crypto.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\nodir\Desktop\project 2\ghost_cpp\src\license_manager.cpp">
+    <ClCompile Include="C:\Users\nodir\Desktop\my_projects\project 2\ghost_cpp\src\license_manager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\nodir\Desktop\project 2\ghost_cpp\src\config.cpp">
+    <ClCompile Include="C:\Users\nodir\Desktop\my_projects\project 2\ghost_cpp\src\config.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\nodir\Desktop\project 2\ghost_cpp\src\conversation.cpp">
+    <ClCompile Include="C:\Users\nodir\Desktop\my_projects\project 2\ghost_cpp\src\conversation.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\nodir\Desktop\project 2\ghost_cpp\src\capture_area.cpp">
+    <ClCompile Include="C:\Users\nodir\Desktop\my_projects\project 2\ghost_cpp\src\capture_area.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\nodir\Desktop\project 2\ghost_cpp\src\screen_capture.cpp">
+    <ClCompile Include="C:\Users\nodir\Desktop\my_projects\project 2\ghost_cpp\src\screen_capture.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\nodir\Desktop\project 2\ghost_cpp\src\vision_client.cpp">
+    <ClCompile Include="C:\Users\nodir\Desktop\my_projects\project 2\ghost_cpp\src\vision_client.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\nodir\Desktop\project 2\ghost_cpp\src\keybinder.cpp">
+    <ClCompile Include="C:\Users\nodir\Desktop\my_projects\project 2\ghost_cpp\src\keybinder.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\nodir\Desktop\project 2\ghost_cpp\src\ghost_ui.cpp">
+    <ClCompile Include="C:\Users\nodir\Desktop\my_projects\project 2\ghost_cpp\src\ghost_ui.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\nodir\Desktop\project 2\ghost_cpp\src\mode_selector.cpp">
+    <ClCompile Include="C:\Users\nodir\Desktop\my_projects\project 2\ghost_cpp\src\mode_selector.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\nodir\Desktop\project 2\ghost_cpp\src\activation_ui.cpp">
+    <ClCompile Include="C:\Users\nodir\Desktop\my_projects\project 2\ghost_cpp\src\activation_ui.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\nodir\Desktop\project 2\ghost_cpp\src\setup_ui.cpp">
+    <ClCompile Include="C:\Users\nodir\Desktop\my_projects\project 2\ghost_cpp\src\setup_ui.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\nodir\Desktop\project 2\ghost_cpp\src\ghost_assistant.cpp">
+    <ClCompile Include="C:\Users\nodir\Desktop\my_projects\project 2\ghost_cpp\src\ghost_assistant.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\nodir\Desktop\project 2\ghost_cpp\src\main.cpp">
+    <ClCompile Include="C:\Users\nodir\Desktop\my_projects\project 2\ghost_cpp\src\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="C:\Users\nodir\Desktop\project 2\ghost_cpp\CMakeLists.txt" />
+    <CustomBuild Include="C:\Users\nodir\Desktop\my_projects\project 2\ghost_cpp\CMakeLists.txt" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
-      <UniqueIdentifier>{C7518B28-1B2E-312F-9720-3B004C8DD875}</UniqueIdentifier>
+      <UniqueIdentifier>{DD6C7619-373E-3771-8C7A-F5B6F3BEDEAD}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

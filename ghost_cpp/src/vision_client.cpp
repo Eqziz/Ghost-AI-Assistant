@@ -11,6 +11,13 @@ namespace {
     std::wstring toWide(const std::string& str) {
         if (str.empty()) return L"";
         int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
+        if (size <= 1) {
+            size = MultiByteToWideChar(CP_ACP, 0, str.c_str(), -1, NULL, 0);
+            if (size <= 1) return L"";
+            std::wstring w(size - 1, 0);
+            MultiByteToWideChar(CP_ACP, 0, str.c_str(), -1, &w[0], size);
+            return w;
+        }
         std::wstring w(size - 1, 0);
         MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &w[0], size);
         return w;

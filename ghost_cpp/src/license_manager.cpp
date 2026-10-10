@@ -71,9 +71,10 @@ std::string getHWID() {
     HKEY hKey;
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Cryptography", 0, KEY_READ | KEY_WOW64_64KEY, &hKey) == ERROR_SUCCESS) {
         char guid[256] = { 0 };
-        DWORD guidSize = sizeof(guid);
+        DWORD guidSize = sizeof(guid) - 1;
         if (RegQueryValueExA(hKey, "MachineGuid", nullptr, nullptr, (LPBYTE)guid, &guidSize) == ERROR_SUCCESS) {
             RegCloseKey(hKey);
+            guid[255] = '\0';
             return std::string(guid);
         }
         RegCloseKey(hKey);
@@ -83,6 +84,7 @@ std::string getHWID() {
     char node[MAX_COMPUTERNAME_LENGTH + 1] = { 0 };
     DWORD nodeSize = sizeof(node);
     GetComputerNameA(node, &nodeSize);
+    node[MAX_COMPUTERNAME_LENGTH] = '\0';
     return std::string(node) + "-default-hwid";
 }
 
