@@ -112,7 +112,15 @@ namespace {
 
     std::string getControlText(HWND hwnd) {
         int len = GetWindowTextLengthW(hwnd);
-        if (len <= 0) return "";
+        if (len <= 0) {
+            wchar_t fallbackBuf[512] = { 0 };
+            len = GetWindowTextW(hwnd, fallbackBuf, 512);
+            if (len <= 0) return "";
+            std::string res = toUtf8(fallbackBuf);
+            while (!res.empty() && (res.front() == ' ' || res.front() == '\t')) res.erase(res.begin());
+            while (!res.empty() && (res.back() == ' ' || res.back() == '\t')) res.pop_back();
+            return res;
+        }
         std::vector<wchar_t> buf(len + 1, 0);
         GetWindowTextW(hwnd, buf.data(), len + 1);
         std::string res = toUtf8(buf.data());
@@ -132,6 +140,7 @@ namespace {
         EnableWindow(s_edOllamaUrl, isOllama);
         EnableWindow(s_edOllamaModel, isOllama);
         EnableWindow(s_edOpenRouterKey, !isOllama);
+        EnableWindow(s_edOpenRouterModel, !isOllama);
     }
 
     LRESULT CALLBACK SetupWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
@@ -193,10 +202,34 @@ namespace {
             SendMessage(s_edOpenRouterKey, WM_SETFONT, (WPARAM)s_fontNormal, TRUE);
 
             CreateWindowW(L"STATIC", L"OpenRouter Model:", WS_CHILD | WS_VISIBLE, 35, 169, 120, 20, hwnd, NULL, hInst, NULL);
-            s_edOpenRouterModel = CreateWindowW(L"EDIT", toWide(s_currentConfig.openrouter_model).c_str(),
-                                               WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_READONLY | WS_TABSTOP,
-                                               150, 167, 315, 22, hwnd, (HMENU)ID_EDIT_OPENROUTER_MODEL, hInst, NULL);
+            s_edOpenRouterModel = CreateWindowW(L"COMBOBOX", L"",
+                                               WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_TABSTOP,
+                                               150, 167, 315, 250, hwnd, (HMENU)ID_EDIT_OPENROUTER_MODEL, hInst, NULL);
             SendMessage(s_edOpenRouterModel, WM_SETFONT, (WPARAM)s_fontNormal, TRUE);
+
+            // Популярные Vision/LLM модели на OpenRouter + Llama-4 Scout
+            const wchar_t* PRESET_MODELS[] = {
+                L"meta-llama/llama-3.2-11b-vision-instruct:free",
+                L"meta-llama/llama-3.2-90b-vision-instruct",
+                L"anthropic/claude-3.5-sonnet",
+                L"anthropic/claude-3.5-haiku",
+                L"openai/gpt-4o",
+                L"openai/gpt-4o-mini",
+                L"google/gemini-2.0-flash-001",
+                L"google/gemini-pro-1.5",
+                L"qwen/qwen-2.5-vl-72b-instruct",
+                L"deepseek/deepseek-chat",
+                L"llama-4-scout"
+            };
+            for (const auto* m : PRESET_MODELS) {
+                SendMessageW(s_edOpenRouterModel, CB_ADDSTRING, 0, (LPARAM)m);
+            }
+
+            std::wstring initialModel = toWide(s_currentConfig.openrouter_model);
+            if (initialModel.empty()) {
+                initialModel = L"meta-llama/llama-3.2-11b-vision-instruct:free";
+            }
+            SetWindowTextW(s_edOpenRouterModel, initialModel.c_str());
 
             if (s_currentConfig.backend == "openrouter") {
                 SendMessage(s_rdoOpenRouter, BM_SETCHECK, BST_CHECKED, 0);
@@ -380,7 +413,8 @@ namespace {
             return 0;
         }
 
-        case WM_CTLCOLOREDIT: {
+        case WM_CTLCOLOREDIT:
+        case WM_CTLCOLORLISTBOX: {
             HDC hdcEdit = (HDC)wParam;
             SetTextColor(hdcEdit, RGB(255, 255, 255));
             SetBkColor(hdcEdit, RGB(42, 42, 42));
@@ -408,6 +442,9 @@ namespace {
                 cfg.ollama_model = getControlText(s_edOllamaModel);
                 cfg.openrouter_api_key = getControlText(s_edOpenRouterKey);
                 cfg.openrouter_model = getControlText(s_edOpenRouterModel);
+                if (cfg.openrouter_model.empty()) {
+                    cfg.openrouter_model = "meta-llama/llama-3.2-11b-vision-instruct:free";
+                }
 
                 cfg.system_prompt = getControlText(s_edSystemPrompt);
                 cfg.user_prompt = getControlText(s_edUserPrompt);

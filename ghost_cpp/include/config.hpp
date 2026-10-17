@@ -10,7 +10,7 @@ struct AppConfig {
     std::string ollama_url = "http://localhost:11434";
     std::string ollama_model = "";
     std::string openrouter_api_key = "";
-    std::string openrouter_model = "llama-4-scout";
+    std::string openrouter_model = "meta-llama/llama-3.2-11b-vision-instruct:free";
 
     // Промпты
     std::string system_prompt = "Только правильный ответ без никаких слов";

@@ -471,7 +471,7 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💬 При возникновении вопросов или проблем напишите в поддержку:"
     )
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💬 Написать в поддержку", url=f"https://t.me/{support_username}")],
+        [InlineKeyboardButton("💬 Написать в поддержку", url=f"https://t.me/superuser222")],
         [InlineKeyboardButton("◀️ Главное меню", callback_data="menu_main")]
     ])
     if query:
