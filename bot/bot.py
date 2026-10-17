@@ -453,6 +453,8 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query:
         await query.answer()
 
+    support_username = os.getenv("SUPPORT_USERNAME", "nodir_support").lstrip("@")
+
     text = (
         "📖 **Инструкция и помощь по Ghost AI:**\n\n"
         "1. **Установка:**\n"
@@ -466,9 +468,12 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "3. **HWID Привязка:**\n"
         "• В окне активации есть кнопка «Копировать HWID». Если хотите жестко зафиксировать ключ "
         "за своим компьютером, отправьте этот код в личный кабинет бота.\n\n"
-        "💬 Вопросы и техподдержка: @nodir_support"
+        "💬 При возникновении вопросов или проблем напишите в поддержку:"
     )
-    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Главное меню", callback_data="menu_main")]])
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("💬 Написать в поддержку", url=f"https://t.me/{support_username}")],
+        [InlineKeyboardButton("◀️ Главное меню", callback_data="menu_main")]
+    ])
     if query:
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
     else:
