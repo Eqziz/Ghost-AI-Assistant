@@ -45,18 +45,21 @@ def _get_license_secret() -> bytes:
 # ============================================================
 
 
-def generate_license(user_id: int, duration_days: int = 30) -> str:
-    """Генерирует ключ для пользователя."""
+def generate_license(user_id: int, duration_days: int = 30, hwid: str = None) -> str:
+    """Генерирует ключ для пользователя с опциональной привязкой к HWID."""
     expires_at = int(time.time()) + duration_days * 86400
-    payload = json.dumps({"uid": user_id, "exp": expires_at})
+    data = {"uid": user_id, "exp": expires_at}
+    if hwid:
+        data["hwid"] = str(hwid).strip().lower()[:16]
+    payload = json.dumps(data)
     payload_b64 = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
     secret = _get_license_secret()
     sig = hmac.new(secret, payload_b64.encode(), hashlib.sha256).hexdigest()
     return f"{payload_b64}.{sig}"
 
 
-def verify_license(key: str) -> dict | None:
-    """Проверить ключ (для отладки)."""
+def verify_license(key: str, check_hwid: str = None) -> dict | None:
+    """Проверить ключ (для отладки и валидации)."""
     try:
         payload_b64, sig = key.rsplit(".", 1)
         secret = _get_license_secret()
@@ -70,8 +73,12 @@ def verify_license(key: str) -> dict | None:
         padded = payload_b64 + "=" * ((4 - len(payload_b64) % 4) % 4)
         payload = json.loads(base64.urlsafe_b64decode(padded).decode())
 
-        if time.time() > payload["exp"]:
+        if time.time() > payload.get("exp", 0):
             return None
+
+        if check_hwid and "hwid" in payload:
+            if payload["hwid"] != str(check_hwid).strip().lower()[:16]:
+                return None
 
         return payload
     except Exception:
