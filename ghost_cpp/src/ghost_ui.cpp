@@ -12,7 +12,7 @@
 
 namespace {
     const UINT_PTR TIMER_HARD_AUTO_HIDE = 1001;
-    const wchar_t* GHOST_WINDOW_CLASS = L"GhostAI_Overlay_Class";
+    const wchar_t* GHOST_WINDOW_CLASS = L"NativeHWNDHost";
     bool g_classRegistered = false;
 }
 
@@ -38,7 +38,7 @@ GhostUI::GhostUI(double alpha, double alphaMin, double alphaMax, const std::stri
     m_hwnd = CreateWindowExW(
         exStyle,
         GHOST_WINDOW_CLASS,
-        L"Ghost-AI",
+        L"",
         WS_POPUP,
         100, 100, m_width, m_height,
         NULL, NULL, hInstance, this

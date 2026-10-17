@@ -179,13 +179,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         logStartupStep("DriverClient: Connecting to Ring 0 driver...");
         auto& driver = DriverClient::instance();
         if (driver.connect()) {
+            // ObRegisterCallbacks — безопасная защита от TerminateProcess/OpenProcess
+            // Не используем DKOM (hideProcessTimed) — это риск PatchGuard BSOD,
+            // и избыточно против Ring 3 прокторинга (OES)
             driver.protectProcess();
-            if (mode == "hard") {
-                driver.hideProcessTimed(0, 5000);
-            }
-            logStartupStep("DriverClient: Connected and process protected.");
+            logStartupStep("DriverClient: Connected and process protected via ObCallbacks.");
         } else {
-            logStartupStep("DriverClient: Driver not found (working in user-mode).");
+            logStartupStep("DriverClient: Driver not found (working in user-mode only).");
         }
     } catch (...) {
         logStartupStep("DriverClient: Exception while connecting to driver.");

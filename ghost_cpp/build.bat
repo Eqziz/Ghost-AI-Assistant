@@ -18,10 +18,12 @@ if not exist build (
 )
 
 cd build
-"%CMAKE_BIN%" -G "Visual Studio 17 2022" -A x64 ..
-if %errorlevel% neq 0 (
-    echo [ERROR] CMake configuration failed!
-    exit /b 1
+if not exist CMakeCache.txt (
+    "%CMAKE_BIN%" ..
+    if !errorlevel! neq 0 (
+        echo [ERROR] CMake configuration failed!
+        exit /b 1
+    )
 )
 
 "%CMAKE_BIN%" --build . --config Release

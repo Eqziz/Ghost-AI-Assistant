@@ -1,6 +1,7 @@
 #include "ghost_assistant.hpp"
 #include "screen_capture.hpp"
 #include "license_manager.hpp"
+#include "driver_client.hpp"
 #include <iostream>
 
 GhostAssistant::GhostAssistant(AppConfig config, const std::string& mode)
@@ -22,13 +23,19 @@ GhostAssistant::GhostAssistant(AppConfig config, const std::string& mode)
         m_mode
     );
 
+    if (m_mode == "hard" && m_ui->isFollowing()) {
+        m_ui->toggleFollow(); // В Hard mode окно фиксируется у вопроса, а не мечется за мышью
+    }
+
     m_memory = std::make_unique<ConversationMemory>(
         m_config.max_context_pairs,
         m_config.persist_context
     );
 
     m_client = std::make_unique<VisionClient>(m_config, *m_memory);
-    m_binder = std::make_unique<KeyBinder>();
+    if (m_mode != "hard") {
+        m_binder = std::make_unique<KeyBinder>();
+    }
     m_capture = std::make_unique<CaptureAreaController>(
         m_config.screenshot_offset,
         m_config.capture_step
@@ -63,7 +70,10 @@ void GhostAssistant::setupHotkeys() {
     } else {
         // Light mode
         m_binder->registerHotkey("screenshot", m_config.hotkeys["screenshot"], [this]() {
-            std::thread(&GhostAssistant::processScreen, this).detach();
+            if (m_workerThread.joinable()) {
+                m_workerThread.join();
+            }
+            m_workerThread = std::thread(&GhostAssistant::processScreen, this);
         });
 
         m_binder->registerHotkey("toggle_follow", m_config.hotkeys["toggle_follow"], [this]() {
@@ -127,7 +137,10 @@ void GhostAssistant::startHardwarePolling() {
 
         while (m_running) {
             if (GetAsyncKeyState(VK_F2_KEY) & 0x8000) {
-                std::thread(&GhostAssistant::processScreen, this).detach();
+                if (m_workerThread.joinable()) {
+                    m_workerThread.join();
+                }
+                m_workerThread = std::thread(&GhostAssistant::processScreen, this);
                 while ((GetAsyncKeyState(VK_F2_KEY) & 0x8000) && m_running) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 }
@@ -214,6 +227,14 @@ void GhostAssistant::processScreen() {
 
 void GhostAssistant::killApp() {
     m_running = false;
+    try {
+        auto& driver = DriverClient::instance();
+        if (driver.isConnected()) {
+            driver.unprotectProcess();
+            driver.disconnect();
+        }
+    } catch (...) {}
+
     if (m_ui) {
         m_ui->destroy();
     }
@@ -227,6 +248,9 @@ void GhostAssistant::shutdown() {
     }
     if (m_positionThread.joinable()) {
         m_positionThread.join();
+    }
+    if (m_workerThread.joinable()) {
+        m_workerThread.join();
     }
     if (m_binder) {
         m_binder->unregisterAll();

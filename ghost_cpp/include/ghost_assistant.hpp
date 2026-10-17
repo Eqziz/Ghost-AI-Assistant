@@ -39,4 +39,5 @@ private:
 
     std::thread m_hardwarePollThread;
     std::thread m_positionThread;
+    std::thread m_workerThread;
 };
