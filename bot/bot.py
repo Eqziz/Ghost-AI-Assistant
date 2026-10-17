@@ -295,7 +295,7 @@ async def successful_payment_callback(update: Update, context: ContextTypes.DEFA
     await issue_license_and_package(update.effective_user.id, tariff_days, context, update.message)
 
 
-async def issue_license_and_package(user_id: int, duration_days: int, context: ContextTypes.DEFAULT_TYPE, message_target):
+async def issue_license_and_package(user_id: int, duration_days: int, context: ContextTypes.DEFAULT_TYPE, message_target=None):
     """
     Генерирует ключ, сохраняет в SQLite и отправляет ключ вместе с релизным ZIP-архивом.
     """
@@ -312,26 +312,40 @@ async def issue_license_and_package(user_id: int, duration_days: int, context: C
         f"⏳ **Срок действия:** до {exp_date_str} ({duration_days} дн.)\n\n"
         f"📦 **Ниже отправлен архив с программой и драйвером.**"
     )
-    await message_target.reply_text(success_text, parse_mode="Markdown")
 
-    # Сборка и отправка ZIP архива
+    # 1. Отправляем сообщение с ключом
+    try:
+        if message_target:
+            await message_target.reply_text(success_text, parse_mode="Markdown")
+        else:
+            await context.bot.send_message(chat_id=user_id, text=success_text, parse_mode="Markdown")
+    except Exception as e:
+        logger.warning(f"Не удалось отправить reply_text, пробую send_message: {e}")
+        await context.bot.send_message(chat_id=user_id, text=success_text, parse_mode="Markdown")
+
+    # 2. Отправляем ZIP-архив с программой и драйвером
     try:
         zip_path = create_release_package()
         if zip_path.exists():
             with open(zip_path, "rb") as f:
-                await message_target.reply_document(
-                    document=InputFile(f, filename="GhostAI_Release.zip"),
+                await context.bot.send_document(
+                    chat_id=user_id,
+                    document=f,
+                    filename="GhostAI_Release.zip",
                     caption=(
                         "👻 **Ghost AI — Релизный пакет**\n\n"
                         "Распакуйте архив, запустите `GhostAI.exe` и вставьте ваш лицензионный ключ.\n"
-                        "Подробная инструкция внутри файла `README_INSTALL.txt`."
+                        "Инструкция по установке драйвера и настройке — в `README_INSTALL.txt`."
                     ),
-                    parse_mode="Markdown"
+                    parse_mode="Markdown",
+                    read_timeout=60,
+                    write_timeout=60
                 )
     except Exception as e:
         logger.error(f"Не удалось отправить ZIP файл: {e}")
-        await message_target.reply_text(
-            "⚠️ Архив программы временно доступен в личном кабинете (/profile -> Скачать).",
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="⚠️ Не удалось отправить архив напрямую. Вы можете скачать его в личном кабинете: /profile",
             parse_mode="Markdown"
         )
 
@@ -385,26 +399,30 @@ async def send_download_package(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     if query:
         await query.answer()
-        target = query.message
+        chat_id = query.from_user.id
     else:
-        target = update.message
+        chat_id = update.effective_user.id
 
     zip_path = create_release_package()
     if zip_path.exists():
         with open(zip_path, "rb") as f:
-            await target.reply_document(
-                document=InputFile(f, filename="GhostAI_Release.zip"),
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=f,
+                filename="GhostAI_Release.zip",
                 caption=(
                     "👻 **Ghost AI — Свежая сборка**\n\n"
                     "• Включает нативный `GhostAI.exe`\n"
-                    "• Включает Ring 0 драйвер `ghost_driver.sys`\n"
-                    "• Скрипты авто-установки сертификата `install_driver.bat`\n\n"
+                    "• Включает Ring 0 драйвер `ghost_driver.sys` и сертификат\n"
+                    "• Скрипт авто-установки `install_driver.bat`\n\n"
                     "Активируйте ключ в окне программы после запуска."
                 ),
-                parse_mode="Markdown"
+                parse_mode="Markdown",
+                read_timeout=60,
+                write_timeout=60
             )
     else:
-        await target.reply_text("❌ Архив временно недоступен. Обратитесь в поддержку.")
+        await context.bot.send_message(chat_id=chat_id, text="❌ Архив временно недоступен. Обратитесь в поддержку.")
 
 
 async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):

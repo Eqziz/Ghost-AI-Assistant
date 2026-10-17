@@ -70,16 +70,16 @@ def create_release_package(force: bool = False) -> Path:
     DIST_DIR.mkdir(parents=True, exist_ok=True)
 
     exe_path = ROOT_DIR / "ghost_cpp" / "build" / "Release" / "GhostAI.exe"
-    driver_path = ROOT_DIR / "ghost_cpp" / "driver_ring0" / "ghost_driver.sys"
-    install_bat = ROOT_DIR / "install_driver.bat"
-    build_bat = ROOT_DIR / "build_driver.bat"
+    driver_dir = ROOT_DIR / "ghost_cpp" / "driver_ring0"
+    driver_path = driver_dir / "ghost_driver.sys"
+    cert_path = driver_dir / "ghost_driver_test.cer"
+    install_bat = driver_dir / "install_driver.bat"
 
     # Проверяем, нужно ли пересобирать архив
     if ZIP_PATH.exists() and not force:
         zip_mtime = ZIP_PATH.stat().st_mtime
-        sources_mtime = max(
-            p.stat().st_mtime for p in [exe_path, driver_path, install_bat] if p.exists()
-        ) if any(p.exists() for p in [exe_path, driver_path, install_bat]) else 0
+        key_files = [exe_path, driver_path, install_bat, cert_path]
+        sources_mtime = max((p.stat().st_mtime for p in key_files if p.exists()), default=0)
         if zip_mtime > sources_mtime:
             return ZIP_PATH
 
@@ -89,10 +89,10 @@ def create_release_package(force: bool = False) -> Path:
             zf.write(exe_path, arcname="GhostAI.exe")
         if driver_path.exists():
             zf.write(driver_path, arcname="ghost_driver.sys")
+        if cert_path.exists():
+            zf.write(cert_path, arcname="ghost_driver_test.cer")
         if install_bat.exists():
             zf.write(install_bat, arcname="install_driver.bat")
-        if build_bat.exists():
-            zf.write(build_bat, arcname="build_driver.bat")
 
         # Добавляем README и шаблон конфига
         zf.writestr("README_INSTALL.txt", README_TEXT)
@@ -105,3 +105,4 @@ def create_release_package(force: bool = False) -> Path:
 if __name__ == "__main__":
     p = create_release_package(force=True)
     print("Готово:", p, f"({p.stat().st_size} bytes)")
+
