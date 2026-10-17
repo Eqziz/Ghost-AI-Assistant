@@ -1,0 +1,21 @@
+# Build artifacts
+ghost_cpp/build/
+ghost_cpp/driver_ring0/*.obj
+ghost_cpp/driver_ring0/*.pdb
+ghost_cpp/driver_ring0/*.cer
+*.obj
+*.pdb
+*.tlog
+*.recipe
+*.lastbuildstate
+*.log
+*.dmp
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local config & licenses
+.ghost_ai_config.json
+.ghost_ai_license.json
+key.txt

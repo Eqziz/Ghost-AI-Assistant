@@ -21,7 +21,7 @@ echo [*] Compiling ghost_driver.c ...
 "%CL_EXE%" /nologo /c /Zi /W4 /WX- /Od ^
     /D _AMD64_ /D _WIN64 /D NTDDI_VERSION=0x0A00000C /D _WIN32_WINNT=0x0A00 ^
     /D DEPRECATE_DDK_FUNCTIONS=1 /D POOL_NX_OPTIN=1 ^
-    /kernel /GS- /Gy /GR- ^
+    /kernel /GS /Gy /GR- ^
     /I"%WDK_ROOT%\Include\%WDK_VERSION%\km" ^
     /I"%WDK_ROOT%\Include\%SDK_VERSION%\shared" ^
     /I"%WDK_ROOT%\Include\%SDK_VERSION%\ucrt" ^
@@ -51,9 +51,36 @@ echo [*] Linking ghost_driver.sys ...
 
 if errorlevel 1 goto :link_failed
 
+echo [*] Signing ghost_driver.sys with test certificate ...
+
+set "BIN_ROOT=%WDK_ROOT%\bin\%SDK_VERSION%\x64"
+set "MAKECERT_EXE=%BIN_ROOT%\makecert.exe"
+set "SIGNTOOL_EXE=%BIN_ROOT%\signtool.exe"
+
+if exist "ghost_driver_test.cer" goto :skip_makecert
+if not exist "%MAKECERT_EXE%" goto :skip_makecert
+echo [*] Generating self-signed test certificate ...
+"%MAKECERT_EXE%" -r -pe -ss "GhostCertStore" -n "CN=GhostAIDriver" -a sha256 -eku "1.3.6.1.5.5.7.3.3" "ghost_driver_test.cer" >nul 2>&1
+:skip_makecert
+
+if not exist "%SIGNTOOL_EXE%" goto :no_signtool
+"%SIGNTOOL_EXE%" sign /s "GhostCertStore" /n "GhostAIDriver" /fd sha256 ghost_driver.sys
+if errorlevel 1 goto :sign_warn
+echo [OK] ghost_driver.sys signed successfully.
+goto :after_sign
+
+:sign_warn
+echo [WARNING] Test signing failed. Driver might require manual signing.
+goto :after_sign
+
+:no_signtool
+echo [WARNING] signtool.exe not found at %SIGNTOOL_EXE%.
+
+:after_sign
+
 echo.
 echo ======================================================================
-echo [OK] ghost_driver.sys successfully compiled and linked!
+echo [OK] ghost_driver.sys successfully compiled, linked and signed!
 echo.
 echo [!] To test in Windows Test Mode (Admin command prompt):
 echo     bcdedit /set testsigning on
