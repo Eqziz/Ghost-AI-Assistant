@@ -85,13 +85,14 @@ TARIFFS = {
 }
 
 
-def get_main_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
+def get_main_keyboard(is_admin: bool = False, has_active_license: bool = False) -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton("💳 Купить подписку", callback_data="menu_buy")],
-        [InlineKeyboardButton("👤 Личный кабинет", callback_data="menu_profile"),
-         InlineKeyboardButton("📥 Скачать софт", callback_data="menu_download")],
-        [InlineKeyboardButton("📖 Инструкция и помощь", callback_data="menu_help")]
+        [InlineKeyboardButton("👤 Личный кабинет", callback_data="menu_profile")]
     ]
+    if has_active_license or is_admin:
+        buttons[1].append(InlineKeyboardButton("📥 Скачать софт", callback_data="menu_download"))
+    buttons.append([InlineKeyboardButton("📖 Инструкция и помощь", callback_data="menu_help")])
     if is_admin:
         buttons.append([InlineKeyboardButton("⚙️ Админ-панель", callback_data="menu_admin")])
     return InlineKeyboardMarkup(buttons)
@@ -102,6 +103,7 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.add_or_update_user(user.id, user.username, user.first_name)
 
     is_admin = (user.id == ADMIN_ID)
+    has_active_lic = bool(db.get_active_license(user.id))
     text = (
         f"👋 Привет, {user.first_name}!\n\n"
         f"👻 **Ghost AI** — скрытный нативный ассистент с мгновенным анализом экрана "
@@ -113,10 +115,11 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Мгновенный ответ прямо на экране поверх всех окон\n\n"
         f"Выберите действие ниже:"
     )
+    markup = get_main_keyboard(is_admin, has_active_lic)
     if update.message:
-        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard(is_admin))
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=markup)
     elif update.callback_query:
-        await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard(is_admin))
+        await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=markup)
 
 
 async def show_buy_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -403,6 +406,26 @@ async def send_download_package(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         chat_id = update.effective_user.id
 
+    # Проверяем наличие активной лицензии
+    lic = db.get_active_license(chat_id)
+    if not lic and chat_id != ADMIN_ID:
+        text = (
+            "🔒 **Скачивание доступно только после покупки лицензии!**\n\n"
+            "Вы получите ссылку на скачивание актуального архива и лицензионный ключ "
+            "сразу после выбора тарифа и оплаты.\n\n"
+            "Нажмите кнопку ниже, чтобы приобрести подписку:"
+        )
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💳 Купить подписку", callback_data="menu_buy")],
+            [InlineKeyboardButton("◀️ Главное меню", callback_data="menu_main")]
+        ])
+        if query:
+            await query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
+        else:
+            await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
+        return
+
+    # Только если лицензия активна или это админ — отправляем архив!
     zip_path = create_release_package()
     if zip_path.exists():
         with open(zip_path, "rb") as f:
@@ -415,7 +438,7 @@ async def send_download_package(update: Update, context: ContextTypes.DEFAULT_TY
                     "• Включает нативный `GhostAI.exe`\n"
                     "• Включает Ring 0 драйвер `ghost_driver.sys` и сертификат\n"
                     "• Скрипт авто-установки `install_driver.bat`\n\n"
-                    "Активируйте ключ в окне программы после запуска."
+                    "Активируйте ваш ключ в окне программы после запуска."
                 ),
                 parse_mode="Markdown",
                 read_timeout=60,
