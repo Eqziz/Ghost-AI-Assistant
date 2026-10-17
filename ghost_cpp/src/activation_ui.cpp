@@ -8,6 +8,8 @@ namespace {
     HWND s_statusLabel = NULL;
     HWND s_btnActivate = NULL;
     HWND s_btnBuy = NULL;
+    HWND s_btnCopyHwid = NULL;
+    std::wstring s_cachedHwid;
     HFONT s_titleFont = NULL;
     HFONT s_subFont = NULL;
     HFONT s_editFont = NULL;
@@ -17,6 +19,9 @@ namespace {
     LRESULT CALLBACK ActivationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
         switch (uMsg) {
         case WM_CREATE: {
+            std::string hwidShort = LicenseManager::getHWIDHash().substr(0, 16);
+            s_cachedHwid = std::wstring(hwidShort.begin(), hwidShort.end());
+
             s_titleFont = CreateFontW(28, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                                       DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                       CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
@@ -31,6 +36,11 @@ namespace {
 
             HINSTANCE hInst = ((LPCREATESTRUCT)lParam)->hInstance;
 
+            s_btnCopyHwid = CreateWindowW(L"BUTTON", L"📋 Копировать HWID",
+                                          WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                          310, 94, 160, 26, hwnd, (HMENU)205, hInst, NULL);
+            SendMessage(s_btnCopyHwid, WM_SETFONT, (WPARAM)s_subFont, TRUE);
+
             s_keyEdit = CreateWindowW(L"EDIT", L"",
                                       WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
                                       40, 130, 430, 32, hwnd, (HMENU)201, hInst, NULL);
@@ -38,12 +48,12 @@ namespace {
 
             s_btnActivate = CreateWindowW(L"BUTTON", L"✓ Активировать",
                                           WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
-                                          70, 200, 170, 40, hwnd, (HMENU)202, hInst, NULL);
+                                          60, 200, 175, 40, hwnd, (HMENU)202, hInst, NULL);
             SendMessage(s_btnActivate, WM_SETFONT, (WPARAM)s_subFont, TRUE);
 
             s_btnBuy = CreateWindowW(L"BUTTON", L"💫 Купить в Telegram",
                                      WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                                     260, 200, 180, 40, hwnd, (HMENU)203, hInst, NULL);
+                                     255, 200, 195, 40, hwnd, (HMENU)203, hInst, NULL);
             SendMessage(s_btnBuy, WM_SETFONT, (WPARAM)s_subFont, TRUE);
 
             s_statusLabel = CreateWindowW(L"STATIC", L"",
@@ -88,8 +98,13 @@ namespace {
 
             SelectObject(hdc, s_subFont);
             SetTextColor(hdc, RGB(180, 180, 180));
-            RECT subRc = { 0, 60, rc.right, 110 };
+            RECT subRc = { 0, 55, rc.right, 90 };
             DrawTextW(hdc, L"Введите лицензионный ключ\n(получен в @gghostaibot после оплаты)", -1, &subRc, DT_CENTER);
+
+            RECT hwidRc = { 40, 98, 305, 120 };
+            SetTextColor(hdc, RGB(0, 212, 255));
+            std::wstring hwidDisplay = L"HWID: " + s_cachedHwid;
+            DrawTextW(hdc, hwidDisplay.c_str(), -1, &hwidRc, DT_LEFT | DT_SINGLELINE);
 
             RECT formatRc = { 0, 168, rc.right, 190 };
             SetTextColor(hdc, RGB(120, 120, 120));
@@ -102,7 +117,24 @@ namespace {
 
         case WM_COMMAND: {
             int id = LOWORD(wParam);
-            if (id == 202) { // Активировать
+            if (id == 205) { // Копировать HWID
+                if (OpenClipboard(hwnd)) {
+                    EmptyClipboard();
+                    size_t bytes = (s_cachedHwid.size() + 1) * sizeof(wchar_t);
+                    HGLOBAL hGlob = GlobalAlloc(GMEM_MOVEABLE, bytes);
+                    if (hGlob) {
+                        void* pMem = GlobalLock(hGlob);
+                        if (pMem) {
+                            memcpy(pMem, s_cachedHwid.c_str(), bytes);
+                            GlobalUnlock(hGlob);
+                            SetClipboardData(CF_UNICODETEXT, hGlob);
+                        }
+                    }
+                    CloseClipboard();
+                    SetWindowTextW(s_statusLabel, L"✓ HWID скопирован в буфер обмена!");
+                }
+                return 0;
+            } else if (id == 202) { // Активировать
                 wchar_t keyBuf[512] = { 0 };
                 GetWindowTextW(s_keyEdit, keyBuf, 512);
 
@@ -125,7 +157,7 @@ namespace {
 
                 auto optData = LicenseManager::verifyKey(key);
                 if (!optData) {
-                    SetWindowTextW(s_statusLabel, L"❌ Невалидный ключ. Проверьте правильность ввода.");
+                    SetWindowTextW(s_statusLabel, L"❌ Невалидный ключ или ключ привязан к другому ПК.");
                     return 0;
                 }
 

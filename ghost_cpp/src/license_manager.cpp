@@ -13,6 +13,20 @@ namespace {
     const char* _APP_OBF_HEX = "bf33b4113b6110ccc4b2d3c01eb6460096376972809bcc980d354c473dc5f54c";
 
     std::wstring getLicenseFilePathW() {
+        // 1. Проверяем рядом с исполняемым файлом (портативный режим)
+        wchar_t exePath[MAX_PATH] = { 0 };
+        if (GetModuleFileNameW(NULL, exePath, MAX_PATH) > 0) {
+            std::wstring dir(exePath);
+            size_t slash = dir.find_last_of(L"\\/");
+            if (slash != std::wstring::npos) {
+                std::wstring localLic = dir.substr(0, slash + 1) + L".ghost_ai_license.json";
+                if (GetFileAttributesW(localLic.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                    return localLic;
+                }
+            }
+        }
+
+        // 2. Fallback в профиль пользователя (%USERPROFILE%\.ghost_ai_license.json)
         wchar_t userProfile[MAX_PATH];
         if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
             return std::wstring(userProfile) + L"\\.ghost_ai_license.json";
@@ -118,10 +132,21 @@ std::optional<LicenseData> verifyKey(const std::string& key) {
             return std::nullopt;
         }
 
+        std::string currentHwid = getHWIDHash();
+        if (j.contains("hwid") && j["hwid"].is_string()) {
+            std::string boundHwid = j["hwid"].get<std::string>();
+            if (!boundHwid.empty()) {
+                std::string currentSub = currentHwid.substr(0, boundHwid.length());
+                if (boundHwid != currentSub) {
+                    return std::nullopt; // Ключ привязан к другому ПК!
+                }
+            }
+        }
+
         LicenseData data;
         data.telegram_id = j["uid"].get<int64_t>();
         data.expires_at = j["exp"].get<int64_t>();
-        data.hwid_hash = getHWIDHash();
+        data.hwid_hash = currentHwid;
         return data;
     } catch (...) {
         return std::nullopt;
