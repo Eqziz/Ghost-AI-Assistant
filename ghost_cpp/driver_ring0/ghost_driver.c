@@ -296,111 +296,19 @@ VOID RelinkDpcRoutine(
 }
 
 /* ======================================================================
- * HideProcessTimed — временное скрытие процесса из списка процессов
+ * HideProcessTimed — временное скрытие процесса из списка процессов (DKOM)
+ * Отключено в целях безопасности: на современных x64 Windows модификация
+ * ActiveProcessLinks вызывает PatchGuard BugCheck 0x109 или 0x139.
  * ====================================================================== */
 NTSTATUS HideProcessTimed(ULONG processId, ULONG durationMs)
 {
-    /* Запрещено скрывать System (PID 4) или Idle (PID 0) */
-    if (processId == 0 || processId == 4) {
-        return STATUS_ACCESS_DENIED;
-    }
+    UNREFERENCED_PARAMETER(processId);
+    UNREFERENCED_PARAMETER(durationMs);
 
-    /* Ограничение длительности скрытия: 500мс .. 10000мс */
-    if (durationMs == 0) durationMs = 3000;
-    if (durationMs < 500) durationMs = 500;
-    if (durationMs > 10000) durationMs = 10000;
-
-    /* Одновременно допускается только одно скрытие */
-    if (InterlockedCompareExchange(&g_dkomInProgress, 1, 0) != 0) {
-        return STATUS_DEVICE_BUSY;
-    }
-
-    ULONG linksOffset = DetectActiveProcessLinksOffset();
-    if (linksOffset == 0) {
-        InterlockedExchange(&g_dkomInProgress, 0);
-        DbgPrint("[GhostDriver] DKOM failed: ActiveProcessLinks offset not detected.\n");
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    PEPROCESS targetProcess = NULL;
-    NTSTATUS status = PsLookupProcessByProcessId(
-        (HANDLE)(ULONG_PTR)processId, &targetProcess);
-
-    if (!NT_SUCCESS(status)) {
-        InterlockedExchange(&g_dkomInProgress, 0);
-        return status;
-    }
-
-    /* Проверяем, не завершается ли процесс */
-    if (PsGetProcessExitStatus(targetProcess) != STATUS_PENDING) {
-        ObDereferenceObject(targetProcess);
-        InterlockedExchange(&g_dkomInProgress, 0);
-        return STATUS_PROCESS_IS_TERMINATING;
-    }
-
-    KIRQL oldIrql;
-    KeAcquireSpinLock(&g_dkomLock, &oldIrql);
-
-    PLIST_ENTRY pLinks = (PLIST_ENTRY)((PUCHAR)targetProcess + linksOffset);
-
-    if (!MmIsAddressValid(pLinks) ||
-        !MmIsAddressValid((PUCHAR)pLinks + sizeof(LIST_ENTRY) - 1))
-    {
-        KeReleaseSpinLock(&g_dkomLock, oldIrql);
-        ObDereferenceObject(targetProcess);
-        InterlockedExchange(&g_dkomInProgress, 0);
-        return STATUS_INVALID_ADDRESS;
-    }
-
-    /* Процесс уже скрыт? */
-    if (pLinks->Flink == pLinks || pLinks->Blink == pLinks) {
-        KeReleaseSpinLock(&g_dkomLock, oldIrql);
-        ObDereferenceObject(targetProcess);
-        InterlockedExchange(&g_dkomInProgress, 0);
-        return STATUS_ALREADY_DISCONNECTED;
-    }
-
-    PLIST_ENTRY prev = pLinks->Blink;
-    PLIST_ENTRY next = pLinks->Flink;
-
-    if (prev == NULL || next == NULL ||
-        !MmIsAddressValid(prev) || !MmIsAddressValid(next) ||
-        prev->Flink != pLinks || next->Blink != pLinks)
-    {
-        KeReleaseSpinLock(&g_dkomLock, oldIrql);
-        ObDereferenceObject(targetProcess);
-        InterlockedExchange(&g_dkomInProgress, 0);
-        return STATUS_INVALID_ADDRESS;
-    }
-
-    /* Сохраняем адреса соседей */
-    g_savedFlink.Flink = next;
-    g_savedBlink.Flink = prev;
-
-    /* Исключаем из двусвязного списка */
-    prev->Flink = next;
-    next->Blink = prev;
-
-    /* Замыкаем узел на себя (self-loop) */
-    pLinks->Flink = pLinks;
-    pLinks->Blink = pLinks;
-
-    /* Фиксируем состояние для автоматического релинка */
-    g_hiddenProcess = targetProcess; /* ссылка удерживается до RelinkProcess */
-    g_hiddenLinks   = pLinks;
-
-    KeReleaseSpinLock(&g_dkomLock, oldIrql);
-
-    /* Заводим таймер автовозврата */
-    LARGE_INTEGER dueTime;
-    dueTime.QuadPart = -((LONGLONG)durationMs * 10000LL);
-    KeSetTimer(&g_relinkTimer, dueTime, &g_relinkDpc);
-
-    DbgPrint("[GhostDriver] Process %lu hidden for %lu ms (auto-relink armed).\n",
-             processId, durationMs);
-
-    return STATUS_SUCCESS;
+    DbgPrint("[GhostDriver] HideProcessTimed: DKOM is disabled to guarantee PatchGuard stability.\n");
+    return STATUS_NOT_SUPPORTED;
 }
+
 
 /* ======================================================================
  * ObRegisterCallbacks — Защита процесса от несанкционированного доступа
@@ -627,9 +535,6 @@ DriverEntry(
 
     /* Регистрируем ObCallbacks сразу при загрузке драйвера */
     RegisterProtectionCallbacks();
-
-    /* Заранее обнаруживаем смещение ActiveProcessLinks */
-    DetectActiveProcessLinksOffset();
 
     DbgPrint("[GhostDriver] Loaded successfully (ObCallbacks initialized, Device secured).\n");
     return STATUS_SUCCESS;
