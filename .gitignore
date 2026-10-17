@@ -19,3 +19,6 @@ __pycache__/
 .ghost_ai_config.json
 .ghost_ai_license.json
 key.txt
+*.db
+bot/dist/
+.env
