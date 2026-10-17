@@ -87,34 +87,38 @@ namespace {
 
     std::wstring toWide(const std::string& str) {
         if (str.empty()) return L"";
-        int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
-        if (size <= 1) {
-            size = MultiByteToWideChar(CP_ACP, 0, str.c_str(), -1, NULL, 0);
-            if (size <= 1) return L"";
-            std::wstring w(size - 1, 0);
-            MultiByteToWideChar(CP_ACP, 0, str.c_str(), -1, &w[0], size);
+        int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), static_cast<int>(str.size()), NULL, 0);
+        if (size <= 0) {
+            size = MultiByteToWideChar(CP_ACP, 0, str.c_str(), static_cast<int>(str.size()), NULL, 0);
+            if (size <= 0) return L"";
+            std::wstring w(size, 0);
+            MultiByteToWideChar(CP_ACP, 0, str.c_str(), static_cast<int>(str.size()), &w[0], size);
             return w;
         }
-        std::wstring w(size - 1, 0);
-        MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &w[0], size);
+        std::wstring w(size, 0);
+        MultiByteToWideChar(CP_UTF8, 0, str.c_str(), static_cast<int>(str.size()), &w[0], size);
         return w;
     }
 
     std::string toUtf8(const wchar_t* wstr) {
-        if (!wstr) return "";
-        int size = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, NULL, 0, NULL, NULL);
-        if (size <= 1) return "";
-        std::string s(size - 1, 0);
-        WideCharToMultiByte(CP_UTF8, 0, wstr, -1, &s[0], size, NULL, NULL);
+        if (!wstr || !*wstr) return "";
+        int len = static_cast<int>(wcslen(wstr));
+        int size = WideCharToMultiByte(CP_UTF8, 0, wstr, len, NULL, 0, NULL, NULL);
+        if (size <= 0) return "";
+        std::string s(size, 0);
+        WideCharToMultiByte(CP_UTF8, 0, wstr, len, &s[0], size, NULL, NULL);
         return s;
     }
 
     std::string getControlText(HWND hwnd) {
         int len = GetWindowTextLengthW(hwnd);
         if (len <= 0) return "";
-        std::vector<wchar_t> buf(len + 1);
+        std::vector<wchar_t> buf(len + 1, 0);
         GetWindowTextW(hwnd, buf.data(), len + 1);
-        return toUtf8(buf.data());
+        std::string res = toUtf8(buf.data());
+        while (!res.empty() && (res.front() == ' ' || res.front() == '\t')) res.erase(res.begin());
+        while (!res.empty() && (res.back() == ' ' || res.back() == '\t')) res.pop_back();
+        return res;
     }
 
     std::string getMapKey(const std::map<std::string, std::string>& m, const std::string& key, const std::string& def) {

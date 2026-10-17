@@ -7,6 +7,25 @@
 
 namespace {
     std::wstring getConfigFilePathW() {
+        // 1. Проверяем config.json или .ghost_ai_config.json рядом с исполняемым файлом (портативный режим)
+        wchar_t exePath[MAX_PATH] = { 0 };
+        if (GetModuleFileNameW(NULL, exePath, MAX_PATH) > 0) {
+            std::wstring dir(exePath);
+            size_t slash = dir.find_last_of(L"\\/");
+            if (slash != std::wstring::npos) {
+                std::wstring exeDir = dir.substr(0, slash + 1);
+                std::wstring localCfg = exeDir + L"config.json";
+                if (GetFileAttributesW(localCfg.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                    return localCfg;
+                }
+                std::wstring localDotCfg = exeDir + L".ghost_ai_config.json";
+                if (GetFileAttributesW(localDotCfg.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                    return localDotCfg;
+                }
+            }
+        }
+
+        // 2. Fallback в профиль пользователя (%USERPROFILE%\.ghost_ai_config.json)
         wchar_t userProfile[MAX_PATH];
         if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
             return std::wstring(userProfile) + L"\\.ghost_ai_config.json";

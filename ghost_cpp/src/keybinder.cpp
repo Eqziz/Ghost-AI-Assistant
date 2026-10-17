@@ -9,9 +9,86 @@ HHOOK KeyBinder::s_hook = NULL;
 static std::mutex s_keyMutex;
 
 namespace {
+    // Маппинг русских букв (UTF-8) на виртуальные коды клавиш QWERTY
+    int mapCyrillicToVk(const std::string& token) {
+        if (token.size() == 2 && static_cast<unsigned char>(token[0]) >= 0xD0) {
+            unsigned char b1 = static_cast<unsigned char>(token[0]);
+            unsigned char b2 = static_cast<unsigned char>(token[1]);
+            uint32_t uc = ((b1 & 0x1F) << 6) | (b2 & 0x3F);
+
+            // Приведение строчных русских к прописным (0x0430..0x044F -> 0x0410..0x042F)
+            if (uc >= 0x0430 && uc <= 0x044F) uc -= 0x20;
+            else if (uc == 0x0451) uc = 0x0401; // ё -> Ё
+
+            switch (uc) {
+                case 0x0419: return 'Q'; // Й
+                case 0x0426: return 'W'; // Ц
+                case 0x0423: return 'E'; // У
+                case 0x041A: return 'R'; // К
+                case 0x0415: return 'T'; // Е
+                case 0x041D: return 'Y'; // Н
+                case 0x0413: return 'U'; // Г
+                case 0x0428: return 'I'; // Ш
+                case 0x0429: return 'O'; // Щ
+                case 0x0417: return 'P'; // З
+                case 0x0425: return VK_OEM_4; // Х -> [
+                case 0x042A: return VK_OEM_6; // Ъ -> ]
+                case 0x0424: return 'A'; // Ф
+                case 0x042B: return 'S'; // Ы
+                case 0x0412: return 'D'; // В
+                case 0x0410: return 'F'; // А
+                case 0x041F: return 'G'; // П
+                case 0x0420: return 'H'; // Р
+                case 0x041E: return 'J'; // О
+                case 0x041B: return 'K'; // Л
+                case 0x0414: return 'L'; // Д
+                case 0x0416: return VK_OEM_1; // Ж -> ;
+                case 0x042D: return VK_OEM_7; // Э -> '
+                case 0x042F: return 'Z'; // Я
+                case 0x0427: return 'X'; // Ч
+                case 0x0421: return 'C'; // С
+                case 0x041C: return 'V'; // М
+                case 0x0418: return 'B'; // И
+                case 0x0422: return 'N'; // Т
+                case 0x042C: return 'M'; // Ь
+                case 0x0411: return VK_OEM_COMMA; // Б -> ,
+                case 0x042E: return VK_OEM_PERIOD; // Ю -> .
+                case 0x0401: return VK_OEM_3; // Ё -> `
+            }
+        }
+        return 0;
+    }
+
     std::string toLower(const std::string& str) {
-        std::string s = str;
-        std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+        std::string s;
+        s.reserve(str.size());
+        for (size_t i = 0; i < str.size(); ++i) {
+            unsigned char c = static_cast<unsigned char>(str[i]);
+            // Базовый ASCII
+            if (c >= 'A' && c <= 'Z') {
+                s.push_back(static_cast<char>(c + ('a' - 'A')));
+            } else if (c == 0xD0 && i + 1 < str.size()) {
+                // Кириллица А..Я (0xD0 0x90 .. 0xD0 0xAF) и Ё (0xD0 0x81)
+                unsigned char c2 = static_cast<unsigned char>(str[i + 1]);
+                if (c2 >= 0x90 && c2 <= 0x9F) {
+                    s.push_back(static_cast<char>(0xD0));
+                    s.push_back(static_cast<char>(c2 + 0x20));
+                    i++;
+                } else if (c2 >= 0xA0 && c2 <= 0xAF) {
+                    s.push_back(static_cast<char>(0xD1));
+                    s.push_back(static_cast<char>(c2 - 0x20));
+                    i++;
+                } else if (c2 == 0x81) { // Ё -> ё
+                    s.push_back(static_cast<char>(0xD1));
+                    s.push_back(static_cast<char>(0x91));
+                    i++;
+                } else {
+                    s.push_back(static_cast<char>(c));
+                }
+            } else {
+                s.push_back(static_cast<char>(c));
+            }
+        }
         return s;
     }
 
@@ -49,16 +126,16 @@ KeyCombo KeyBinder::parseKeyCombo(const std::string& keyStr) {
 
     for (size_t i = 0; i < parts.size(); ++i) {
         const std::string& p = parts[i];
-        if (p == "ctrl" || p == "control") combo.ctrl = true;
-        else if (p == "shift") combo.shift = true;
-        else if (p == "alt") combo.alt = true;
-        else if (p == "win") combo.win = true;
+        if (p == "ctrl" || p == "control" || p == "rctrl" || p == "lctrl" || p == "ктрл" || p == "контрол") combo.ctrl = true;
+        else if (p == "shift" || p == "rshift" || p == "lshift" || p == "шифт") combo.shift = true;
+        else if (p == "alt" || p == "ralt" || p == "lalt" || p == "альт") combo.alt = true;
+        else if (p == "win" || p == "вин") combo.win = true;
         else if (p == "right ctrl") { combo.ctrl = true; combo.vkCode = VK_RCONTROL; }
         else if (p == "left ctrl") { combo.ctrl = true; combo.vkCode = VK_LCONTROL; }
-        else if (p == "esc" || p == "escape") combo.vkCode = VK_ESCAPE;
-        else if (p == "tab") combo.vkCode = VK_TAB;
-        else if (p == "enter" || p == "return") combo.vkCode = VK_RETURN;
-        else if (p == "space") combo.vkCode = VK_SPACE;
+        else if (p == "esc" || p == "escape" || p == "эск" || p == "эскейп") combo.vkCode = VK_ESCAPE;
+        else if (p == "tab" || p == "таб") combo.vkCode = VK_TAB;
+        else if (p == "enter" || p == "return" || p == "ввод") combo.vkCode = VK_RETURN;
+        else if (p == "space" || p == "пробел") combo.vkCode = VK_SPACE;
         else if (p == "up") combo.vkCode = VK_UP;
         else if (p == "down") combo.vkCode = VK_DOWN;
         else if (p == "left") combo.vkCode = VK_LEFT;
@@ -88,6 +165,8 @@ KeyCombo KeyBinder::parseKeyCombo(const std::string& keyStr) {
                     combo.vkCode = VK_F1 + (fnum - 1);
                 }
             } catch (...) {}
+        } else if (int cyrVk = mapCyrillicToVk(p)) {
+            combo.vkCode = cyrVk;
         } else if (p.length() == 1) {
             char c = p[0];
             if (c >= 'a' && c <= 'z') combo.vkCode = 'A' + (c - 'a');
