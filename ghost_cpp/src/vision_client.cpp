@@ -1,4 +1,5 @@
 #include "vision_client.hpp"
+#include "obfuscator.hpp"
 #include <windows.h>
 #include <winhttp.h>
 #include <sstream>
@@ -44,8 +45,10 @@ namespace {
 
 std::string VisionClient::httpPost(const std::string& url, const std::string& jsonPayload, const std::string& authHeader, int timeoutSec) {
     std::string fullUrl = url;
-    if (fullUrl.rfind("http://", 0) != 0 && fullUrl.rfind("https://", 0) != 0) {
-        fullUrl = "http://" + fullUrl;
+    std::string httpPrefix = _X("http://");
+    std::string httpsPrefix = _X("https://");
+    if (fullUrl.rfind(httpPrefix, 0) != 0 && fullUrl.rfind(httpsPrefix, 0) != 0) {
+        fullUrl = httpPrefix + fullUrl;
     }
     std::wstring wUrl = toWide(fullUrl);
 
@@ -57,55 +60,78 @@ std::string VisionClient::httpPost(const std::string& url, const std::string& js
     urlComp.dwExtraInfoLength = (DWORD)-1;
 
     if (!WinHttpCrackUrl(wUrl.c_str(), (DWORD)wUrl.length(), 0, &urlComp)) {
-        throw std::runtime_error("WinHttpCrackUrl failed: " + url);
+        throw std::runtime_error("WinHttpCrackUrl failed");
     }
 
     std::wstring hostName(urlComp.lpszHostName, urlComp.dwHostNameLength);
-    std::wstring urlPath = (urlComp.dwUrlPathLength > 0) ? std::wstring(urlComp.lpszUrlPath, urlComp.dwUrlPathLength) : L"/";
-    if (urlComp.dwExtraInfoLength > 0) {
-        urlPath.append(urlComp.lpszExtraInfo, urlComp.dwExtraInfoLength);
-    }
-    bool isHttps = (urlComp.nScheme == INTERNET_SCHEME_HTTPS);
+    std::wstring urlPath(urlComp.lpszUrlPath, urlComp.dwUrlPathLength + urlComp.dwExtraInfoLength);
     INTERNET_PORT port = urlComp.nPort;
+    bool isHttps = (urlComp.nScheme == INTERNET_SCHEME_HTTPS);
 
-    WinHttpHandle hSession = WinHttpOpen(L"Ghost-AI/2.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    WinHttpHandle hSession = WinHttpOpen(
+        _XWC(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64)"),
+        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        WINHTTP_NO_PROXY_NAME,
+        WINHTTP_NO_PROXY_BYPASS,
+        0
+    );
     if (!hSession) {
         throw std::runtime_error("WinHttpOpen failed");
     }
 
-    DWORD timeoutMs = static_cast<DWORD>(timeoutSec * 1000);
-    WinHttpSetTimeouts(hSession, timeoutMs, timeoutMs, timeoutMs, timeoutMs);
+    int timeoutMs = timeoutSec * 1000;
+    WinHttpSetTimeouts(hSession, 10000, 10000, timeoutMs, timeoutMs);
 
     WinHttpHandle hConnect = WinHttpConnect(hSession, hostName.c_str(), port, 0);
     if (!hConnect) {
-        throw std::runtime_error("WinHttpConnect failed for host: " + fullUrl);
+        throw std::runtime_error("WinHttpConnect failed");
     }
 
-    DWORD flags = isHttps ? WINHTTP_FLAG_SECURE : 0;
-    WinHttpHandle hRequest = WinHttpOpenRequest(hConnect, L"POST", urlPath.c_str(), NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+    DWORD reqFlags = isHttps ? WINHTTP_FLAG_SECURE : 0;
+    WinHttpHandle hRequest = WinHttpOpenRequest(
+        hConnect,
+        _XWC(L"POST"),
+        urlPath.c_str(),
+        NULL,
+        WINHTTP_NO_REFERER,
+        WINHTTP_DEFAULT_ACCEPT_TYPES,
+        reqFlags
+    );
     if (!hRequest) {
         throw std::runtime_error("WinHttpOpenRequest failed");
     }
 
-    std::wstring headers = L"Content-Type: application/json; charset=utf-8\r\n";
+    if (isHttps) {
+        DWORD secFlags = SECURITY_FLAG_IGNORE_UNKNOWN_CA |
+                         SECURITY_FLAG_IGNORE_CERT_DATE_INVALID |
+                         SECURITY_FLAG_IGNORE_CERT_CN_INVALID |
+                         SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE;
+        WinHttpSetOption(hRequest, WINHTTP_OPTION_SECURITY_FLAGS, &secFlags, sizeof(secFlags));
+    }
+
+    std::wstring headers = _XW(L"Content-Type: application/json; charset=utf-8\r\n");
     if (!authHeader.empty()) {
         headers += toWide(authHeader) + L"\r\n";
     }
 
-    BOOL sendOk = WinHttpSendRequest(hRequest, headers.c_str(), (DWORD)headers.length(),
-                                     (LPVOID)jsonPayload.c_str(), (DWORD)jsonPayload.length(),
-                                     (DWORD)jsonPayload.length(), 0);
+    BOOL sendOk = WinHttpSendRequest(
+        hRequest,
+        headers.c_str(), (DWORD)headers.length(),
+        (LPVOID)jsonPayload.data(), (DWORD)jsonPayload.length(),
+        (DWORD)jsonPayload.length(),
+        0
+    );
 
     if (!sendOk) {
         DWORD err = GetLastError();
         if (err == ERROR_WINHTTP_TIMEOUT) {
-            throw std::runtime_error("Таймаут сетевого запроса к ИИ серверу");
+            throw std::runtime_error("Network timeout");
         }
-        throw std::runtime_error("Сетевая ошибка WinHttpSendRequest: " + std::to_string(err));
+        throw std::runtime_error("Network error: " + std::to_string(err));
     }
 
     if (!WinHttpReceiveResponse(hRequest, NULL)) {
-        throw std::runtime_error("Сервер не ответил (WinHttpReceiveResponse failed)");
+        throw std::runtime_error("No response from server");
     }
 
     DWORD statusCode = 0;
@@ -136,10 +162,10 @@ std::string VisionClient::buildUserPrompt(const std::string& prompt) {
     if (m_memory.isEnabled()) {
         auto turns = m_memory.getTurns(false);
         if (!turns.empty()) {
-            historyText = "\n\nПРЕДЫДУЩИЙ ДИАЛОГ:\n";
+            historyText = "\n\n" + _X("PREVIOUS:") + "\n";
             for (size_t i = 0; i < turns.size(); ++i) {
-                historyText += "[" + std::to_string(i + 1) + "] Пользователь: " + turns[i].user_text + "\n";
-                historyText += "[" + std::to_string(i + 1) + "] Ассистент: " + turns[i].assistant_text + "\n";
+                historyText += "[" + std::to_string(i + 1) + "] User: " + turns[i].user_text + "\n";
+                historyText += "[" + std::to_string(i + 1) + "] Assistant: " + turns[i].assistant_text + "\n";
             }
         }
     }
@@ -151,98 +177,98 @@ std::string VisionClient::buildUserPrompt(const std::string& prompt) {
     if (!historyText.empty()) {
         res += historyText + "\n\n";
     }
-    res += "ЗАДАНИЕ:\n" + prompt;
+    res += _X("PROMPT:\n") + prompt;
     return res;
 }
 
 std::string VisionClient::analyzeOllama(const std::string& imageBase64, const std::string& prompt) {
     std::string baseUrl = m_config.ollama_url;
     while (!baseUrl.empty() && baseUrl.back() == '/') baseUrl.pop_back();
-    std::string url = baseUrl + "/api/generate";
+    std::string url = baseUrl + _X("/api/generate");
 
     std::string fullPrompt = buildUserPrompt(prompt);
 
     nlohmann::json payload;
-    payload["model"] = m_config.ollama_model;
-    payload["prompt"] = fullPrompt;
-    payload["images"] = nlohmann::json::array({ imageBase64 });
-    payload["stream"] = false;
+    payload[_XC("model")] = m_config.ollama_model;
+    payload[_XC("prompt")] = fullPrompt;
+    payload[_XC("images")] = nlohmann::json::array({ imageBase64 });
+    payload[_XC("stream")] = false;
 
     std::string respStr = httpPost(url, payload.dump(), "", m_config.request_timeout);
     auto j = nlohmann::json::parse(respStr);
-    if (j.contains("error")) {
-        std::string err = j["error"].is_string() ? j["error"].get<std::string>() : j["error"].dump();
+    if (j.contains(_XC("error"))) {
+        std::string err = j[_XC("error")].is_string() ? j[_XC("error")].get<std::string>() : j[_XC("error")].dump();
         throw std::runtime_error("Ollama API: " + err);
     }
-    std::string answer = j.value("response", "");
+    std::string answer = j.value(_XC("response"), "");
     if (answer.empty()) {
-        throw std::runtime_error("Ollama: пустой ответ");
+        throw std::runtime_error("Ollama: empty response");
     }
     return answer;
 }
 
 std::string VisionClient::analyzeOpenRouter(const std::string& imageBase64, const std::string& prompt) {
-    std::string url = "https://openrouter.ai/api/v1/chat/completions";
-    std::string authHeader = "Authorization: Bearer " + m_config.openrouter_api_key;
+    std::string url = _X("https://openrouter.ai/api/v1/chat/completions");
+    std::string authHeader = _X("Authorization: Bearer ") + m_config.openrouter_api_key;
 
     nlohmann::json messages = nlohmann::json::array();
     if (!m_config.system_prompt.empty()) {
         messages.push_back({
-            {"role", "system"},
-            {"content", m_config.system_prompt}
+            {_XC("role"), _XC("system")},
+            {_XC("content"), m_config.system_prompt}
         });
     }
 
     if (m_memory.isEnabled()) {
         auto turns = m_memory.getTurns(m_config.include_images_in_context);
         for (const auto& t : turns) {
-            messages.push_back({{"role", "user"}, {"content", t.user_text}});
-            messages.push_back({{"role", "assistant"}, {"content", t.assistant_text}});
+            messages.push_back({{_XC("role"), _XC("user")}, {_XC("content"), t.user_text}});
+            messages.push_back({{_XC("role"), _XC("assistant")}, {_XC("content"), t.assistant_text}});
         }
     }
 
     nlohmann::json userContent = nlohmann::json::array();
-    userContent.push_back({{"type", "text"}, {"text", prompt}});
+    userContent.push_back({{_XC("type"), _XC("text")}, {_XC("text"), prompt}});
     userContent.push_back({
-        {"type", "image_url"},
-        {"image_url", {{"url", "data:image/jpeg;base64," + imageBase64}}}
+        {_XC("type"), _XC("image_url")},
+        {_XC("image_url"), {{_XC("url"), _X("data:image/jpeg;base64,") + imageBase64}}}
     });
 
     messages.push_back({
-        {"role", "user"},
-        {"content", userContent}
+        {_XC("role"), _XC("user")},
+        {_XC("content"), userContent}
     });
 
     nlohmann::json payload;
-    payload["model"] = m_config.openrouter_model;
-    payload["messages"] = messages;
-    payload["max_tokens"] = 500;
+    payload[_XC("model")] = m_config.openrouter_model;
+    payload[_XC("messages")] = messages;
+    payload[_XC("max_tokens")] = 500;
 
     std::string respStr = httpPost(url, payload.dump(), authHeader, m_config.request_timeout);
     auto j = nlohmann::json::parse(respStr);
 
-    if (j.contains("error")) {
-        if (j["error"].is_object()) {
-            throw std::runtime_error("OpenRouter API: " + j["error"].value("message", "Неизвестная ошибка"));
-        } else if (j["error"].is_string()) {
-            throw std::runtime_error("OpenRouter API: " + j["error"].get<std::string>());
+    if (j.contains(_XC("error"))) {
+        if (j[_XC("error")].is_object()) {
+            throw std::runtime_error("OpenRouter API: " + j[_XC("error")].value(_XC("message"), "Error"));
+        } else if (j[_XC("error")].is_string()) {
+            throw std::runtime_error("OpenRouter API: " + j[_XC("error")].get<std::string>());
         }
     }
 
     std::string answer;
     try {
-        auto content = j["choices"][0]["message"]["content"];
+        auto content = j[_XC("choices")][0][_XC("message")][_XC("content")];
         if (content.is_string()) {
             answer = content.get<std::string>();
         } else if (content.is_array()) {
             for (const auto& part : content) {
-                if (part.is_object() && part.value("type", "") == "text") {
-                    answer += part.value("text", "") + " ";
+                if (part.is_object() && part.value(_XC("type"), "") == _X("text")) {
+                    answer += part.value(_XC("text"), "") + " ";
                 }
             }
         }
     } catch (const std::exception& e) {
-        throw std::runtime_error("OpenRouter: некорректный ответ: " + std::string(e.what()));
+        throw std::runtime_error("OpenRouter parse error: " + std::string(e.what()));
     }
 
     // Trim
@@ -250,7 +276,7 @@ std::string VisionClient::analyzeOpenRouter(const std::string& imageBase64, cons
     while (!answer.empty() && (answer.back() == ' ' || answer.back() == '\n' || answer.back() == '\r')) answer.pop_back();
 
     if (answer.empty()) {
-        throw std::runtime_error("OpenRouter: пустой ответ");
+        throw std::runtime_error("OpenRouter: empty response");
     }
     return answer;
 }
@@ -259,12 +285,12 @@ std::string VisionClient::analyze(const std::string& imageBase64) {
     std::string userPrompt = m_config.user_prompt;
     std::string answer;
 
-    if (m_config.backend == "ollama") {
+    if (m_config.backend == _X("ollama")) {
         answer = analyzeOllama(imageBase64, userPrompt);
-    } else if (m_config.backend == "openrouter") {
+    } else if (m_config.backend == _X("openrouter")) {
         answer = analyzeOpenRouter(imageBase64, userPrompt);
     } else {
-        throw std::runtime_error("Неизвестный backend: " + m_config.backend);
+        throw std::runtime_error("Unknown backend: " + m_config.backend);
     }
 
     m_memory.addTurn(userPrompt, imageBase64, answer);

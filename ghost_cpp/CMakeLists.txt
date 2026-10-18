@@ -9,6 +9,11 @@ add_definitions(-DUNICODE -D_UNICODE -D_CRT_SECURE_NO_WARNINGS -DNOMINMAX)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+if(MSVC)
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Oi /Ot /Oy /GL /Gy /GS")
+    set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG /OPT:REF /OPT:ICF /DEBUG:NONE")
+endif()
+
 set(SOURCES
     src/anti_analysis.cpp
     src/crypto.cpp

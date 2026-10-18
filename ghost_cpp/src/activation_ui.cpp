@@ -1,4 +1,6 @@
 #include "activation_ui.hpp"
+#include "obfuscator.hpp"
+#include "anti_analysis.hpp"
 #include <windows.h>
 #include <shellapi.h>
 
@@ -24,91 +26,87 @@ namespace {
 
             s_titleFont = CreateFontW(28, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                                       DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                      CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+                                      CLEARTYPE_QUALITY, DEFAULT_PITCH, _XWC(L"Segoe UI"));
             s_subFont = CreateFontW(15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                    CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+                                    CLEARTYPE_QUALITY, DEFAULT_PITCH, _XWC(L"Segoe UI"));
             s_editFont = CreateFontW(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                     CLEARTYPE_QUALITY, FIXED_PITCH, L"Consolas");
+                                     CLEARTYPE_QUALITY, FIXED_PITCH, _XWC(L"Consolas"));
             s_darkBgBrush = CreateSolidBrush(RGB(30, 30, 30));
             s_editBgBrush = CreateSolidBrush(RGB(42, 42, 42));
 
             HINSTANCE hInst = ((LPCREATESTRUCT)lParam)->hInstance;
 
-            s_btnCopyHwid = CreateWindowW(L"BUTTON", L"📋 Копировать HWID",
+            s_btnCopyHwid = CreateWindowW(_XWC(L"BUTTON"), _XWC(L"📋 Копировать HWID"),
                                           WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                           310, 94, 160, 26, hwnd, (HMENU)205, hInst, NULL);
             SendMessage(s_btnCopyHwid, WM_SETFONT, (WPARAM)s_subFont, TRUE);
 
-            s_keyEdit = CreateWindowW(L"EDIT", L"",
+            s_keyEdit = CreateWindowW(_XWC(L"EDIT"), L"",
                                       WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
                                       40, 130, 430, 32, hwnd, (HMENU)201, hInst, NULL);
             SendMessage(s_keyEdit, WM_SETFONT, (WPARAM)s_editFont, TRUE);
 
-            s_btnActivate = CreateWindowW(L"BUTTON", L"✓ Активировать",
+            s_btnActivate = CreateWindowW(_XWC(L"BUTTON"), _XWC(L"✓ Активировать"),
                                           WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
                                           60, 200, 175, 40, hwnd, (HMENU)202, hInst, NULL);
             SendMessage(s_btnActivate, WM_SETFONT, (WPARAM)s_subFont, TRUE);
 
-            s_btnBuy = CreateWindowW(L"BUTTON", L"💫 Купить в Telegram",
+            s_btnBuy = CreateWindowW(_XWC(L"BUTTON"), _XWC(L"💫 Купить в Telegram"),
                                      WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                      255, 200, 195, 40, hwnd, (HMENU)203, hInst, NULL);
             SendMessage(s_btnBuy, WM_SETFONT, (WPARAM)s_subFont, TRUE);
 
-            s_statusLabel = CreateWindowW(L"STATIC", L"",
+            s_statusLabel = CreateWindowW(_XWC(L"STATIC"), L"",
                                           WS_CHILD | WS_VISIBLE | SS_CENTER,
-                                          30, 255, 450, 40, hwnd, (HMENU)204, hInst, NULL);
+                                          40, 255, 430, 28, hwnd, (HMENU)204, hInst, NULL);
             SendMessage(s_statusLabel, WM_SETFONT, (WPARAM)s_subFont, TRUE);
-
             return 0;
-        }
-
-        case WM_CTLCOLOREDIT: {
-            HDC hdcEdit = (HDC)wParam;
-            SetTextColor(hdcEdit, RGB(255, 255, 255));
-            SetBkColor(hdcEdit, RGB(42, 42, 42));
-            return (LRESULT)s_editBgBrush;
         }
 
         case WM_CTLCOLORSTATIC: {
             HDC hdcStatic = (HDC)wParam;
-            HWND hStatic = (HWND)lParam;
-            if (hStatic == s_statusLabel) {
-                SetTextColor(hdcStatic, RGB(255, 85, 85));
-            } else {
-                SetTextColor(hdcStatic, RGB(200, 200, 200));
-            }
-            SetBkColor(hdcStatic, RGB(30, 30, 30));
+            SetBkMode(hdcStatic, TRANSPARENT);
+            SetTextColor(hdcStatic, RGB(255, 80, 80));
             return (LRESULT)s_darkBgBrush;
+        }
+
+        case WM_CTLCOLOREDIT: {
+            HDC hdcEdit = (HDC)wParam;
+            SetTextColor(hdcEdit, RGB(240, 240, 240));
+            SetBkColor(hdcEdit, RGB(42, 42, 42));
+            return (LRESULT)s_editBgBrush;
         }
 
         case WM_PAINT: {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
+
             RECT rc;
             GetClientRect(hwnd, &rc);
             FillRect(hdc, &rc, s_darkBgBrush);
 
-            HFONT oldFont = (HFONT)SelectObject(hdc, s_titleFont);
             SetBkMode(hdc, TRANSPARENT);
-            SetTextColor(hdc, RGB(0, 212, 255));
-            RECT titleRc = { 0, 20, rc.right, 55 };
-            DrawTextW(hdc, L"👻 Ghost AI", -1, &titleRc, DT_CENTER | DT_SINGLELINE);
+
+            HFONT oldFont = (HFONT)SelectObject(hdc, s_titleFont);
+            SetTextColor(hdc, RGB(255, 255, 255));
+            RECT titleRc = { 0, 16, rc.right, 50 };
+            DrawTextW(hdc, _XWC(L"GHOST AI"), -1, &titleRc, DT_CENTER | DT_SINGLELINE);
 
             SelectObject(hdc, s_subFont);
             SetTextColor(hdc, RGB(180, 180, 180));
             RECT subRc = { 0, 55, rc.right, 90 };
-            DrawTextW(hdc, L"Введите лицензионный ключ\n(получен в @gghostaibot после оплаты)", -1, &subRc, DT_CENTER);
+            DrawTextW(hdc, _XWC(L"Введите лицензионный ключ\n(получен в @gghostaibot после оплаты)"), -1, &subRc, DT_CENTER);
 
             RECT hwidRc = { 40, 98, 305, 120 };
             SetTextColor(hdc, RGB(0, 212, 255));
-            std::wstring hwidDisplay = L"HWID: " + s_cachedHwid;
+            std::wstring hwidDisplay = _XW(L"HWID: ") + s_cachedHwid;
             DrawTextW(hdc, hwidDisplay.c_str(), -1, &hwidRc, DT_LEFT | DT_SINGLELINE);
 
             RECT formatRc = { 0, 168, rc.right, 190 };
             SetTextColor(hdc, RGB(120, 120, 120));
-            DrawTextW(hdc, L"Формат: <base64>.<hmac_hex>", -1, &formatRc, DT_CENTER | DT_SINGLELINE);
+            DrawTextW(hdc, _XWC(L"Формат: <base64>.<hmac_hex>"), -1, &formatRc, DT_CENTER | DT_SINGLELINE);
 
             SelectObject(hdc, oldFont);
             EndPaint(hwnd, &ps);
@@ -131,10 +129,12 @@ namespace {
                         }
                     }
                     CloseClipboard();
-                    SetWindowTextW(s_statusLabel, L"✓ HWID скопирован в буфер обмена!");
+                    SetWindowTextW(s_statusLabel, _XWC(L"✓ HWID скопирован в буфер обмена!"));
                 }
                 return 0;
             } else if (id == 202) { // Активировать
+                AntiAnalysis::runGuard();
+
                 wchar_t keyBuf[512] = { 0 };
                 GetWindowTextW(s_keyEdit, keyBuf, 512);
 
@@ -151,30 +151,30 @@ namespace {
                 while (!key.empty() && (key.back() == ' ' || key.back() == '\t')) key.pop_back();
 
                 if (key.empty()) {
-                    SetWindowTextW(s_statusLabel, L"⚠️ Введите ключ");
+                    SetWindowTextW(s_statusLabel, _XWC(L"⚠️ Введите ключ"));
                     return 0;
                 }
 
                 auto optData = LicenseManager::verifyKey(key);
                 if (!optData) {
-                    SetWindowTextW(s_statusLabel, L"❌ Невалидный ключ или ключ привязан к другому ПК.");
+                    SetWindowTextW(s_statusLabel, _XWC(L"❌ Невалидный ключ или ключ привязан к другому ПК."));
                     return 0;
                 }
 
                 if (optData->isExpired()) {
-                    SetWindowTextW(s_statusLabel, L"❌ Срок действия лицензии истёк.");
+                    SetWindowTextW(s_statusLabel, _XWC(L"❌ Срок действия лицензии истёк."));
                     return 0;
                 }
 
                 if (!LicenseManager::saveLicense(key)) {
-                    SetWindowTextW(s_statusLabel, L"❌ Не удалось сохранить лицензию.");
+                    SetWindowTextW(s_statusLabel, _XWC(L"❌ Не удалось сохранить лицензию."));
                     return 0;
                 }
 
                 s_activatedData = optData;
                 DestroyWindow(hwnd);
             } else if (id == 203) { // Купить в Telegram
-                ShellExecuteA(NULL, "open", "https://t.me/gghostaibot", NULL, NULL, SW_SHOWNORMAL);
+                ShellExecuteA(NULL, _XC("open"), _XC("https://t.me/gghostaibot"), NULL, NULL, SW_SHOWNORMAL);
             }
             return 0;
         }
@@ -197,16 +197,16 @@ std::optional<LicenseData> ActivationUI::showActivationDialog() {
     s_activatedData = std::nullopt;
 
     HINSTANCE hInstance = GetModuleHandle(NULL);
-    const wchar_t* CLASS_NAME = L"GhostAI_ActivationClass";
+    std::wstring className = _XW(L"GhostAI_ActivationClass");
 
     WNDCLASSEXW existingWc = { 0 };
-    if (!GetClassInfoExW(hInstance, CLASS_NAME, &existingWc)) {
+    if (!GetClassInfoExW(hInstance, className.c_str(), &existingWc)) {
         WNDCLASSEXW wc = { 0 };
         wc.cbSize = sizeof(WNDCLASSEXW);
         wc.lpfnWndProc = ActivationWndProc;
         wc.hInstance = hInstance;
         wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-        wc.lpszClassName = CLASS_NAME;
+        wc.lpszClassName = className.c_str();
         wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
         RegisterClassExW(&wc);
     }
@@ -220,8 +220,8 @@ std::optional<LicenseData> ActivationUI::showActivationDialog() {
 
     HWND hwnd = CreateWindowExW(
         WS_EX_TOPMOST,
-        CLASS_NAME,
-        L"Ghost AI — Активация",
+        className.c_str(),
+        _XWC(L"Ghost AI — Активация"),
         WS_POPUP | WS_CAPTION | WS_SYSMENU,
         posX, posY, winW, winH,
         NULL, NULL, hInstance, NULL

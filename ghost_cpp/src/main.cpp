@@ -6,6 +6,7 @@
 #include "ghost_assistant.hpp"
 #include "screen_capture.hpp"
 #include "driver_client.hpp"
+#include "obfuscator.hpp"
 #include <windows.h>
 #include <commctrl.h>
 #include <dbghelp.h>
@@ -17,6 +18,7 @@
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dbghelp.lib")
 
+#ifdef _DEBUG
 namespace {
     void logStartupStep(const std::string& step) {
         std::ofstream ofs("ghost_startup.log", std::ios::app);
@@ -43,8 +45,13 @@ namespace {
         return "Unknown_Module";
     }
 }
+#define LOG_STEP(s) logStartupStep(s)
+#else
+#define LOG_STEP(s) ((void)0)
+#endif
 
 LONG WINAPI CrashFilter(EXCEPTION_POINTERS* pExceptionPointers) {
+#ifdef _DEBUG
     std::ofstream ofs("crash.log", std::ios::trunc);
     if (ofs.is_open()) {
         DWORD code = pExceptionPointers->ExceptionRecord->ExceptionCode;
@@ -71,7 +78,6 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* pExceptionPointers) {
             ofs << "0x" << reinterpret_cast<void*>(targetAddr) << std::endl;
         }
 
-        // Stack backtrace
         ofs << "\n--- Call Stack ---" << std::endl;
         void* stack[16] = { 0 };
         USHORT frames = CaptureStackBackTrace(0, 16, stack, NULL);
@@ -82,7 +88,6 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* pExceptionPointers) {
                 << " in " << frameMod << " + 0x" << frameOffset << std::endl;
         }
 
-        // Generate crash.dmp minidump
         HANDLE hDumpFile = CreateFileA(
             "crash.dmp",
             GENERIC_WRITE,
@@ -111,92 +116,90 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* pExceptionPointers) {
             ofs << "\nMiniDump saved to: crash.dmp" << std::endl;
         }
     }
+#else
+    (void)pExceptionPointers;
+#endif
 
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
-    // 0. Очистка старого ghost_startup.log
-    {
-        std::ofstream clearLog("ghost_startup.log", std::ios::trunc);
-    }
-    logStartupStep("WinMain: Started");
+    // 1. Немедленная защита от анализа и запуск сторожа
+    AntiAnalysis::runGuard();
+    AntiAnalysis::startWatchdog();
 
-    // 1. Обработчик аварийных ситуаций
+    LOG_STEP("WinMain: Started");
+
+    // 2. Обработчик аварийных ситуаций
     SetUnhandledExceptionFilter(CrashFilter);
-    logStartupStep("CrashFilter: Registered");
+    LOG_STEP("CrashFilter: Registered");
 
-    // 2. Инициализация Common Controls (для стабильности интерфейса на всех версиях Windows)
+    // 3. Инициализация Common Controls
     INITCOMMONCONTROLSEX icex = { 0 };
     icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
     icex.dwICC = ICC_WIN95_CLASSES | ICC_STANDARD_CLASSES;
     InitCommonControlsEx(&icex);
-    logStartupStep("CommonControls: Initialized");
-
-    // 3. Защита от анализа и отладчиков
-    AntiAnalysis::runGuard();
-    logStartupStep("AntiAnalysis: Passed");
+    LOG_STEP("CommonControls: Initialized");
 
     // 4. Инициализация GDI+ для скриншотов
     ScreenCapture::initialize();
-    logStartupStep("ScreenCapture: Initialized");
+    LOG_STEP("ScreenCapture: Initialized");
 
     // 5. Проверка лицензии
-    logStartupStep("LicenseManager: Loading license...");
+    LOG_STEP("LicenseManager: Loading license...");
     auto lic = LicenseManager::loadLicense();
     if (!lic || lic->isExpired()) {
-        logStartupStep("LicenseManager: No valid license found, showing ActivationUI...");
+        LOG_STEP("LicenseManager: No valid license found, showing ActivationUI...");
         auto activated = ActivationUI::showActivationDialog();
         if (!activated) {
-            logStartupStep("ActivationUI: Canceled or not activated, shutting down.");
+            LOG_STEP("ActivationUI: Canceled or not activated, shutting down.");
+            AntiAnalysis::stopWatchdog();
             ScreenCapture::shutdown();
             return 0;
         }
-        logStartupStep("ActivationUI: Successfully activated!");
+        LOG_STEP("ActivationUI: Successfully activated!");
     } else {
-        logStartupStep("LicenseManager: Valid license loaded");
+        LOG_STEP("LicenseManager: Valid license loaded");
     }
 
     // 6. Выбор режима (Light vs Hard)
-    logStartupStep("ModeSelector: Showing mode selection dialog...");
+    LOG_STEP("ModeSelector: Showing mode selection dialog...");
     std::string mode = ModeSelector::selectMode();
-    logStartupStep("ModeSelector: Selected mode = " + mode);
+    LOG_STEP("ModeSelector: Selected mode = " + mode);
 
     // 7. Окно настроек SetupUI
-    logStartupStep("SetupUI: Loading initial config...");
+    LOG_STEP("SetupUI: Loading initial config...");
     AppConfig initialCfg = AppConfig::load();
-    logStartupStep("SetupUI: Showing setup dialog...");
+    LOG_STEP("SetupUI: Showing setup dialog...");
     auto updatedCfg = SetupUI::showSetupDialog(initialCfg);
     if (!updatedCfg) {
-        logStartupStep("SetupUI: Canceled, shutting down.");
+        LOG_STEP("SetupUI: Canceled, shutting down.");
+        AntiAnalysis::stopWatchdog();
         ScreenCapture::shutdown();
         return 0;
     }
-    logStartupStep("SetupUI: Config confirmed.");
+    LOG_STEP("SetupUI: Config confirmed.");
 
     // 8. Подключение к Ring 0 драйверу (если загружен)
     try {
-        logStartupStep("DriverClient: Connecting to Ring 0 driver...");
+        LOG_STEP("DriverClient: Connecting to Ring 0 driver...");
         auto& driver = DriverClient::instance();
         if (driver.connect()) {
-            // ObRegisterCallbacks — безопасная защита от TerminateProcess/OpenProcess
-            // Не используем DKOM (hideProcessTimed) — это риск PatchGuard BSOD,
-            // и избыточно против Ring 3 прокторинга (OES)
             driver.protectProcess();
-            logStartupStep("DriverClient: Connected and process protected via ObCallbacks.");
+            LOG_STEP("DriverClient: Connected and process protected via ObCallbacks.");
         } else {
-            logStartupStep("DriverClient: Driver not found (working in user-mode only).");
+            LOG_STEP("DriverClient: Driver not found (working in user-mode only).");
         }
     } catch (...) {
-        logStartupStep("DriverClient: Exception while connecting to driver.");
+        LOG_STEP("DriverClient: Exception while connecting to driver.");
     }
 
     // 9. Запуск главного ассистента
-    logStartupStep("GhostAssistant: Launching assistant...");
+    LOG_STEP("GhostAssistant: Launching assistant...");
     GhostAssistant app(*updatedCfg, mode);
-    logStartupStep("GhostAssistant: Running message loop...");
+    LOG_STEP("GhostAssistant: Running message loop...");
     app.run();
-    logStartupStep("GhostAssistant: Message loop finished.");
+    LOG_STEP("GhostAssistant: Message loop finished.");
 
     // Отключение драйвера и снятие защиты
     try {
@@ -207,8 +210,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
     } catch (...) {}
 
+    AntiAnalysis::stopWatchdog();
     ScreenCapture::shutdown();
-    logStartupStep("GhostAI: Terminated cleanly.");
+    LOG_STEP("GhostAI: Terminated cleanly.");
     return 0;
 }
-

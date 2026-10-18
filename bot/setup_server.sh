@@ -65,3 +65,4 @@ echo "• Посмотреть логи:    journalctl -u ghost_bot -f"
 echo "• Перезапустить:      systemctl restart ghost_bot"
 echo "• Остановить:         systemctl stop ghost_bot"
 echo "======================================================================"
+

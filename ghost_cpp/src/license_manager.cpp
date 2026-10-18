@@ -1,5 +1,7 @@
 #include "license_manager.hpp"
 #include "crypto.hpp"
+#include "obfuscator.hpp"
+#include "anti_analysis.hpp"
 #include <windows.h>
 #include <shlobj.h>
 #include <ctime>
@@ -8,9 +10,17 @@
 #include <iomanip>
 
 namespace {
-    const char* _KEY_HASH = "f3d77924997275d9";
-    const char* _MARKER = "ghost_ai_default_build_marker_2024";
-    const char* _APP_OBF_HEX = "bf33b4113b6110ccc4b2d3c01eb6460096376972809bcc980d354c473dc5f54c";
+    inline std::string getKeyHash() {
+        return _X("f3d77924997275d9");
+    }
+
+    inline std::string getMarker() {
+        return _X("ghost_ai_default_build_marker_2024");
+    }
+
+    inline std::string getAppObfHex() {
+        return _X("bf33b4113b6110ccc4b2d3c01eb6460096376972809bcc980d354c473dc5f54c");
+    }
 
     std::wstring getLicenseFilePathW() {
         // 1. Проверяем рядом с исполняемым файлом (портативный режим)
@@ -19,7 +29,7 @@ namespace {
             std::wstring dir(exePath);
             size_t slash = dir.find_last_of(L"\\/");
             if (slash != std::wstring::npos) {
-                std::wstring localLic = dir.substr(0, slash + 1) + L".ghost_ai_license.json";
+                std::wstring localLic = dir.substr(0, slash + 1) + _XW(L".ghost_ai_license.json");
                 if (GetFileAttributesW(localLic.c_str()) != INVALID_FILE_ATTRIBUTES) {
                     return localLic;
                 }
@@ -29,15 +39,15 @@ namespace {
         // 2. Fallback в профиль пользователя (%USERPROFILE%\.ghost_ai_license.json)
         wchar_t userProfile[MAX_PATH];
         if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
-            return std::wstring(userProfile) + L"\\.ghost_ai_license.json";
+            return std::wstring(userProfile) + _XW(L"\\.ghost_ai_license.json");
         }
-        return L".ghost_ai_license.json";
+        return _XW(L".ghost_ai_license.json");
     }
 
     std::string getLicenseFilePath() {
         std::wstring wp = getLicenseFilePathW();
         int len = WideCharToMultiByte(CP_UTF8, 0, wp.c_str(), -1, NULL, 0, NULL, NULL);
-        if (len <= 1) return ".ghost_ai_license.json";
+        if (len <= 1) return _X(".ghost_ai_license.json");
         std::string s(len - 1, 0);
         WideCharToMultiByte(CP_UTF8, 0, wp.c_str(), -1, &s[0], len, NULL, NULL);
         return s;
@@ -65,28 +75,29 @@ std::string LicenseData::expiresStr() const {
 namespace LicenseManager {
 
 std::vector<uint8_t> getLicenseSecret() {
+    AntiAnalysis::runGuard();
+
     // 1. Двойной SHA256 маркера
-    auto h1 = Crypto::sha256(_MARKER);
+    auto h1 = Crypto::sha256(getMarker());
     auto unobf_v1 = Crypto::sha256(h1.data(), h1.size());
 
     // 2. Проверка маркера
     std::string keyHash = Crypto::sha256Hex(unobf_v1.data(), unobf_v1.size());
-    if (keyHash.substr(0, 16) != _KEY_HASH) {
-        // Возвращаем пустой/случайный буфер при несовпадении
+    if (keyHash.substr(0, 16) != getKeyHash()) {
         return std::vector<uint8_t>(32, 0xAA);
     }
 
     // 3. XOR с обфусцированными данными
-    auto raw = Crypto::hexToBytes(_APP_OBF_HEX);
+    auto raw = Crypto::hexToBytes(getAppObfHex());
     return Crypto::xorCipher(raw, unobf_v1);
 }
 
 std::string getHWID() {
     HKEY hKey;
-    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Cryptography", 0, KEY_READ | KEY_WOW64_64KEY, &hKey) == ERROR_SUCCESS) {
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, _XC("SOFTWARE\\Microsoft\\Cryptography"), 0, KEY_READ | KEY_WOW64_64KEY, &hKey) == ERROR_SUCCESS) {
         char guid[256] = { 0 };
         DWORD guidSize = sizeof(guid) - 1;
-        if (RegQueryValueExA(hKey, "MachineGuid", nullptr, nullptr, (LPBYTE)guid, &guidSize) == ERROR_SUCCESS) {
+        if (RegQueryValueExA(hKey, _XC("MachineGuid"), nullptr, nullptr, (LPBYTE)guid, &guidSize) == ERROR_SUCCESS) {
             RegCloseKey(hKey);
             guid[255] = '\0';
             return std::string(guid);
@@ -99,7 +110,7 @@ std::string getHWID() {
     DWORD nodeSize = sizeof(node);
     GetComputerNameA(node, &nodeSize);
     node[MAX_COMPUTERNAME_LENGTH] = '\0';
-    return std::string(node) + "-default-hwid";
+    return std::string(node) + _X("-default-hwid");
 }
 
 std::string getHWIDHash() {
@@ -107,6 +118,8 @@ std::string getHWIDHash() {
 }
 
 std::optional<LicenseData> verifyKey(const std::string& key) {
+    AntiAnalysis::runGuard();
+
     if (key.empty()) return std::nullopt;
     size_t dotPos = key.rfind('.');
     if (dotPos == std::string::npos) return std::nullopt;
@@ -128,13 +141,17 @@ std::optional<LicenseData> verifyKey(const std::string& key) {
         std::string jsonStr(decoded.begin(), decoded.end());
         auto j = nlohmann::json::parse(jsonStr);
 
-        if (!j.contains("uid") || !j.contains("exp")) {
+        std::string uidKey = _X("uid");
+        std::string expKey = _X("exp");
+        std::string hwidKeyStr = _X("hwid");
+
+        if (!j.contains(uidKey) || !j.contains(expKey)) {
             return std::nullopt;
         }
 
         std::string currentHwid = getHWIDHash();
-        if (j.contains("hwid") && j["hwid"].is_string()) {
-            std::string boundHwid = j["hwid"].get<std::string>();
+        if (j.contains(hwidKeyStr) && j[hwidKeyStr].is_string()) {
+            std::string boundHwid = j[hwidKeyStr].get<std::string>();
             if (!boundHwid.empty()) {
                 std::string currentSub = currentHwid.substr(0, boundHwid.length());
                 if (boundHwid != currentSub) {
@@ -144,8 +161,8 @@ std::optional<LicenseData> verifyKey(const std::string& key) {
         }
 
         LicenseData data;
-        data.telegram_id = j["uid"].get<int64_t>();
-        data.expires_at = j["exp"].get<int64_t>();
+        data.telegram_id = j[uidKey].get<int64_t>();
+        data.expires_at = j[expKey].get<int64_t>();
         data.hwid_hash = currentHwid;
         return data;
     } catch (...) {
@@ -154,13 +171,15 @@ std::optional<LicenseData> verifyKey(const std::string& key) {
 }
 
 bool saveLicense(const std::string& key) {
+    AntiAnalysis::runGuard();
+
     auto optData = verifyKey(key);
     if (!optData) return false;
 
     nlohmann::json payload;
-    payload["uid"] = optData->telegram_id;
-    payload["exp"] = optData->expires_at;
-    payload["hwid"] = optData->hwid_hash;
+    payload[_XC("uid")] = optData->telegram_id;
+    payload[_XC("exp")] = optData->expires_at;
+    payload[_XC("hwid")] = optData->hwid_hash;
 
     std::string rawJson = payload.dump();
     std::vector<uint8_t> rawBytes(rawJson.begin(), rawJson.end());
@@ -177,6 +196,8 @@ bool saveLicense(const std::string& key) {
 }
 
 std::optional<LicenseData> loadLicense() {
+    AntiAnalysis::runGuard();
+
     std::wstring path = getLicenseFilePathW();
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs.is_open()) return std::nullopt;
@@ -192,9 +213,12 @@ std::optional<LicenseData> loadLicense() {
         std::string jsonStr(decrypted.begin(), decrypted.end());
         auto j = nlohmann::json::parse(jsonStr);
 
+        std::string uidKey = _X("uid");
+        std::string expKey = _X("exp");
+
         LicenseData data;
-        data.telegram_id = j.value("uid", 0LL);
-        data.expires_at = j.value("exp", 0LL);
+        data.telegram_id = j.value(uidKey, 0LL);
+        data.expires_at = j.value(expKey, 0LL);
         data.hwid_hash = hwid_hash;
 
         if (data.isExpired()) {
@@ -213,10 +237,10 @@ void clearLicense() {
 
 std::string formatLicenseInfo(const LicenseData& data) {
     std::ostringstream oss;
-    oss << "👻 Лицензия активна\n"
-        << "Telegram ID: " << data.telegram_id << "\n"
-        << "Действует до: " << data.expiresStr() << "\n"
-        << "Осталось дней: " << data.daysLeft();
+    oss << _X("👻 Лицензия активна\n")
+        << _X("Telegram ID: ") << data.telegram_id << "\n"
+        << _X("Действует до: ") << data.expiresStr() << "\n"
+        << _X("Осталось дней: ") << data.daysLeft();
     return oss.str();
 }
 
