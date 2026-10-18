@@ -17,3 +17,4 @@ services:
         value: superuser222
       - key: CRYPTO_PAY_TOKEN
         sync: false
+
