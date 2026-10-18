@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: ghost-ai-bot
+    runtime: python
+    buildCommand: pip install -r bot/requirements.txt
+    startCommand: python bot/bot.py
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_ID
+        sync: false
+      - key: BOT_USERNAME
+        value: gghostaibot
+      - key: SUPPORT_USERNAME
+        value: superuser222
+      - key: CRYPTO_PAY_TOKEN
+        sync: false

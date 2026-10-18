@@ -601,6 +601,46 @@ async def admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"📢 Рассылка завершена. Доставлено: {sent}/{len(user_ids)}")
 
 
+s_web_runner = None
+
+
+async def on_post_init(application: Application):
+    """
+    Запуск легковесного HTTP веб-сервера для health-check пингов от Render и UptimeRobot.
+    Позволяет держать бесплатный сервис на Render онлайн 24/7 без засыпания.
+    """
+    global s_web_runner
+    from aiohttp import web
+    port = int(os.getenv("PORT", 8080))
+    web_app = web.Application()
+
+    async def ping_handler(request):
+        return web.Response(
+            text=f"Ghost AI Bot is running 👻\nStatus: Online\nTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n",
+            content_type="text/plain",
+            status=200
+        )
+
+    web_app.router.add_get("/", ping_handler)
+    web_app.router.add_get("/health", ping_handler)
+
+    try:
+        s_web_runner = web.AppRunner(web_app)
+        await s_web_runner.setup()
+        site = web.TCPSite(s_web_runner, "0.0.0.0", port)
+        await site.start()
+        logger.info(f"Health-check веб-сервер успешно запущен на порту {port} (Render / UptimeRobot активны)")
+    except Exception as e:
+        logger.warning(f"Не удалось запустить веб-сервер на порту {port}: {e}")
+
+
+async def on_post_shutdown(application: Application):
+    """Корректное закрытие веб-сервера при остановке бота."""
+    global s_web_runner
+    if s_web_runner:
+        await s_web_runner.cleanup()
+
+
 # ======================================================================
 #                              ЗАПУСК
 # ======================================================================
@@ -609,7 +649,13 @@ def main():
     logger.info("Инициализация Ghost AI Telegram Bot...")
     create_release_package()  # Проверяем сборку релизного архива при старте
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(on_post_init)
+        .post_shutdown(on_post_shutdown)
+        .build()
+    )
 
     # Команды
     app.add_handler(CommandHandler("start", send_welcome))
