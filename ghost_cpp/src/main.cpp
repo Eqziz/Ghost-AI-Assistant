@@ -188,10 +188,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             driver.protectProcess();
             LOG_STEP("DriverClient: Connected and process protected via ObCallbacks.");
         } else {
-            LOG_STEP("DriverClient: Driver not found (working in user-mode only).");
+            // Без драйвера: включаем Ring 3 защиту процесса через ограниченный DACL и маскировку PEB
+            AntiAnalysis::protectProcessUserMode();
+            AntiAnalysis::maskProcessParameters();
+            AntiAnalysis::maskPEHeader();
+            LOG_STEP("DriverClient: Driver not found. Activated Ring 3 DACL & PEB mask.");
         }
     } catch (...) {
-        LOG_STEP("DriverClient: Exception while connecting to driver.");
+        AntiAnalysis::protectProcessUserMode();
+        AntiAnalysis::maskProcessParameters();
+        AntiAnalysis::maskPEHeader();
+        LOG_STEP("DriverClient: Exception while connecting to driver. Fallback to Ring 3 DACL & PEB mask.");
     }
 
     // 9. Запуск главного ассистента

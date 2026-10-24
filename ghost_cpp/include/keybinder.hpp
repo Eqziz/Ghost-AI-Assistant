@@ -4,6 +4,8 @@
 #include <map>
 #include <functional>
 #include <windows.h>
+#include <thread>
+#include <atomic>
 
 struct KeyCombo {
     int vkCode = 0;
@@ -30,6 +32,11 @@ public:
     static bool handleHookEvent(int vkCode, bool isDown);
 
 private:
+    void startPollingLoop();
+    void stopPollingLoop();
+
     static std::map<std::string, std::pair<KeyCombo, std::function<void()>>> s_bindings;
     static HHOOK s_hook;
+    std::atomic<bool> m_pollRunning{ false };
+    std::thread m_pollThread;
 };

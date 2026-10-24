@@ -1,6 +1,7 @@
 #include "anti_analysis.hpp"
 #include "api_hasher.hpp"
 #include <windows.h>
+#include <aclapi.h>
 #include <chrono>
 #include <thread>
 #include <atomic>
@@ -122,6 +123,7 @@ void startWatchdog() {
     if (s_watchdogRunning.exchange(true)) return;
 
     std::thread th([]() {
+        protectThreadUserMode(GetCurrentThread());
         auto pNtSetInfoThread = ApiHasher::resolve<pfnNtSetInformationThread>(
             ApiHasher::HASH_NTDLL,
             ApiHasher::HASH_NtSetInformationThread
@@ -154,6 +156,110 @@ void maskPEHeader() {
         }
         VirtualProtect(hMod, 4096, oldProtect, &oldProtect);
     }
+}
+
+void protectThreadUserMode(void* hThread) {
+    HANDLE targetThread = hThread ? static_cast<HANDLE>(hThread) : GetCurrentThread();
+    PACL pAcl = (PACL)LocalAlloc(LPTR, sizeof(ACL));
+    if (pAcl) {
+        if (InitializeAcl(pAcl, sizeof(ACL), ACL_REVISION)) {
+            // Ограниченный DACL: запрещает открытие дескриптора потока через OpenThread
+            SetSecurityInfo(targetThread, SE_KERNEL_OBJECT, DACL_SECURITY_INFORMATION, NULL, NULL, pAcl, NULL);
+        }
+        LocalFree(pAcl);
+    }
+}
+
+void protectProcessUserMode() {
+    HANDLE hProcess = GetCurrentProcess();
+    PACL pAcl = (PACL)LocalAlloc(LPTR, sizeof(ACL));
+    if (pAcl) {
+        if (InitializeAcl(pAcl, sizeof(ACL), ACL_REVISION)) {
+            // Ограниченный DACL: запрещает другим Ring 3 процессам открытие нашего процесса через OpenProcess
+            SetSecurityInfo(hProcess, SE_KERNEL_OBJECT, DACL_SECURITY_INFORMATION, NULL, NULL, pAcl, NULL);
+        }
+        LocalFree(pAcl);
+    }
+    protectThreadUserMode(GetCurrentThread());
+}
+
+typedef struct _UNICODE_STRING_DATA {
+    USHORT Length;
+    USHORT MaximumLength;
+    PWSTR Buffer;
+} UNICODE_STRING_DATA, *PUNICODE_STRING_DATA;
+
+void maskProcessParameters(const wchar_t* fakePath, const wchar_t* fakeCmd) {
+#if defined(_M_X64) || defined(__x86_64__)
+    if (!fakePath) fakePath = L"C:\\Windows\\System32\\svchost.exe";
+    if (!fakeCmd) fakeCmd = L"svchost.exe -k netsvcs";
+
+    uint8_t* pPeb = reinterpret_cast<uint8_t*>(__readgsqword(0x60));
+    if (!pPeb) return;
+
+    // 1. Маскировка ProcessParameters (ImagePathName и CommandLine)
+    uint8_t* pParams = *reinterpret_cast<uint8_t**>(pPeb + 0x20);
+    if (pParams) {
+        auto pImagePath = reinterpret_cast<PUNICODE_STRING_DATA>(pParams + 0x60);
+        auto pCmdLine = reinterpret_cast<PUNICODE_STRING_DATA>(pParams + 0x70);
+
+        size_t fakeImageBytes = wcslen(fakePath) * sizeof(wchar_t);
+        if (pImagePath->MaximumLength >= fakeImageBytes + sizeof(wchar_t)) {
+            wcscpy_s(pImagePath->Buffer, pImagePath->MaximumLength / sizeof(wchar_t), fakePath);
+            pImagePath->Length = static_cast<USHORT>(fakeImageBytes);
+        } else {
+            pImagePath->Buffer = const_cast<PWSTR>(fakePath);
+            pImagePath->Length = static_cast<USHORT>(fakeImageBytes);
+            pImagePath->MaximumLength = static_cast<USHORT>(fakeImageBytes + sizeof(wchar_t));
+        }
+
+        size_t fakeCmdBytes = wcslen(fakeCmd) * sizeof(wchar_t);
+        if (pCmdLine->MaximumLength >= fakeCmdBytes + sizeof(wchar_t)) {
+            wcscpy_s(pCmdLine->Buffer, pCmdLine->MaximumLength / sizeof(wchar_t), fakeCmd);
+            pCmdLine->Length = static_cast<USHORT>(fakeCmdBytes);
+        } else {
+            pCmdLine->Buffer = const_cast<PWSTR>(fakeCmd);
+            pCmdLine->Length = static_cast<USHORT>(fakeCmdBytes);
+            pCmdLine->MaximumLength = static_cast<USHORT>(fakeCmdBytes + sizeof(wchar_t));
+        }
+    }
+
+    // 2. Маскировка LDR таблицы (главный исполняемый модуль)
+    uint8_t* pLdr = *reinterpret_cast<uint8_t**>(pPeb + 0x18);
+    if (pLdr) {
+        PLIST_ENTRY pHead = reinterpret_cast<PLIST_ENTRY>(pLdr + 0x10);
+        if (pHead && pHead->Flink != pHead) {
+            uint8_t* pFirstEntry = reinterpret_cast<uint8_t*>(pHead->Flink);
+            if (pFirstEntry) {
+                auto pFullDllName = reinterpret_cast<PUNICODE_STRING_DATA>(pFirstEntry + 0x48);
+                auto pBaseDllName = reinterpret_cast<PUNICODE_STRING_DATA>(pFirstEntry + 0x58);
+
+                const wchar_t* baseName = wcsrchr(fakePath, L'\\');
+                baseName = baseName ? (baseName + 1) : fakePath;
+
+                size_t fullBytes = wcslen(fakePath) * sizeof(wchar_t);
+                if (pFullDllName->MaximumLength >= fullBytes + sizeof(wchar_t)) {
+                    wcscpy_s(pFullDllName->Buffer, pFullDllName->MaximumLength / sizeof(wchar_t), fakePath);
+                    pFullDllName->Length = static_cast<USHORT>(fullBytes);
+                } else {
+                    pFullDllName->Buffer = const_cast<PWSTR>(fakePath);
+                    pFullDllName->Length = static_cast<USHORT>(fullBytes);
+                    pFullDllName->MaximumLength = static_cast<USHORT>(fullBytes + sizeof(wchar_t));
+                }
+
+                size_t baseBytes = wcslen(baseName) * sizeof(wchar_t);
+                if (pBaseDllName->MaximumLength >= baseBytes + sizeof(wchar_t)) {
+                    wcscpy_s(pBaseDllName->Buffer, pBaseDllName->MaximumLength / sizeof(wchar_t), baseName);
+                    pBaseDllName->Length = static_cast<USHORT>(baseBytes);
+                } else {
+                    pBaseDllName->Buffer = const_cast<PWSTR>(baseName);
+                    pBaseDllName->Length = static_cast<USHORT>(baseBytes);
+                    pBaseDllName->MaximumLength = static_cast<USHORT>(baseBytes + sizeof(wchar_t));
+                }
+            }
+        }
+    }
+#endif
 }
 
 } // namespace AntiAnalysis

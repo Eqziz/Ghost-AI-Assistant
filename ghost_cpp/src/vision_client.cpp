@@ -68,10 +68,19 @@ std::string VisionClient::httpPost(const std::string& url, const std::string& js
     INTERNET_PORT port = urlComp.nPort;
     bool isHttps = (urlComp.nScheme == INTERNET_SCHEME_HTTPS);
 
+    DWORD accessType = WINHTTP_ACCESS_TYPE_DEFAULT_PROXY;
+    LPCWSTR proxyName = WINHTTP_NO_PROXY_NAME;
+    std::wstring wProxy;
+    if (!m_config.proxy_url.empty()) {
+        accessType = WINHTTP_ACCESS_TYPE_NAMED_PROXY;
+        wProxy = toWide(m_config.proxy_url);
+        proxyName = wProxy.c_str();
+    }
+
     WinHttpHandle hSession = WinHttpOpen(
         _XWC(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64)"),
-        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME,
+        accessType,
+        proxyName,
         WINHTTP_NO_PROXY_BYPASS,
         0
     );
@@ -126,6 +135,9 @@ std::string VisionClient::httpPost(const std::string& url, const std::string& js
         DWORD err = GetLastError();
         if (err == ERROR_WINHTTP_TIMEOUT) {
             throw std::runtime_error("Network timeout");
+        }
+        if (err == 12029) { // ERROR_WINHTTP_CANNOT_CONNECT
+            throw std::runtime_error("Сетевая ошибка 12029 (соединение заблокировано брандмауэром/проктором). Переключитесь на локальный Ollama (127.0.0.1:11434) или используйте прокси.");
         }
         throw std::runtime_error("Network error: " + std::to_string(err));
     }

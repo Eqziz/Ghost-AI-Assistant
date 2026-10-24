@@ -1,4 +1,5 @@
 #include "keybinder.hpp"
+#include "anti_analysis.hpp"
 #include <algorithm>
 #include <sstream>
 #include <vector>
@@ -7,6 +8,7 @@
 std::map<std::string, std::pair<KeyCombo, std::function<void()>>> KeyBinder::s_bindings;
 HHOOK KeyBinder::s_hook = NULL;
 static std::mutex s_keyMutex;
+static std::map<std::string, uint64_t> s_lastTriggerTimes;
 
 namespace {
     // Маппинг русских букв (UTF-8) на виртуальные коды клавиш QWERTY
@@ -192,11 +194,83 @@ KeyCombo KeyBinder::parseKeyCombo(const std::string& keyStr) {
 
 KeyBinder::KeyBinder() {
     installHook();
+    startPollingLoop();
 }
 
 KeyBinder::~KeyBinder() {
+    stopPollingLoop();
     unregisterAll();
     uninstallHook();
+}
+
+void KeyBinder::startPollingLoop() {
+    m_pollRunning = true;
+    m_pollThread = std::thread([this]() {
+        AntiAnalysis::protectThreadUserMode(GetCurrentThread());
+        std::map<int, bool> lastState;
+        while (m_pollRunning) {
+            std::vector<std::function<void()>> callbacksToRun;
+            uint64_t now = GetTickCount64();
+
+            {
+                std::lock_guard<std::mutex> lock(s_keyMutex);
+                for (const auto& [action, pair] : s_bindings) {
+                    const KeyCombo& kc = pair.first;
+                    if (kc.vkCode == 0) continue;
+
+                    bool isKeyDown = (GetAsyncKeyState(kc.vkCode) & 0x8000) != 0;
+                    bool wasDown = lastState[kc.vkCode];
+                    lastState[kc.vkCode] = isKeyDown;
+
+                    if (isKeyDown && !wasDown) {
+                        bool isCtrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+                        bool isShift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+                        bool isAlt = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+                        bool isWin = ((GetAsyncKeyState(VK_LWIN) & 0x8000) != 0) || ((GetAsyncKeyState(VK_RWIN) & 0x8000) != 0);
+
+                        bool needCtrl = kc.ctrl && (kc.vkCode != VK_CONTROL && kc.vkCode != VK_LCONTROL && kc.vkCode != VK_RCONTROL);
+                        bool hasCtrl = isCtrl && (kc.vkCode != VK_CONTROL && kc.vkCode != VK_LCONTROL && kc.vkCode != VK_RCONTROL);
+                        if (needCtrl != hasCtrl) continue;
+
+                        bool needShift = kc.shift && (kc.vkCode != VK_SHIFT && kc.vkCode != VK_LSHIFT && kc.vkCode != VK_RSHIFT);
+                        bool hasShift = isShift && (kc.vkCode != VK_SHIFT && kc.vkCode != VK_LSHIFT && kc.vkCode != VK_RSHIFT);
+                        if (needShift != hasShift) continue;
+
+                        bool needAlt = kc.alt && (kc.vkCode != VK_MENU && kc.vkCode != VK_LMENU && kc.vkCode != VK_RMENU);
+                        bool hasAlt = isAlt && (kc.vkCode != VK_MENU && kc.vkCode != VK_LMENU && kc.vkCode != VK_RMENU);
+                        if (needAlt != hasAlt) continue;
+
+                        bool needWin = kc.win && (kc.vkCode != VK_LWIN && kc.vkCode != VK_RWIN);
+                        bool hasWin = isWin && (kc.vkCode != VK_LWIN && kc.vkCode != VK_RWIN);
+                        if (needWin != hasWin) continue;
+
+                        // Дебаунс: защита от дублирования вызова с хуком
+                        if (now - s_lastTriggerTimes[action] > 180) {
+                            s_lastTriggerTimes[action] = now;
+                            if (pair.second) {
+                                callbacksToRun.push_back(pair.second);
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (auto& cb : callbacksToRun) {
+                try {
+                    cb();
+                } catch (...) {}
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        }
+    });
+}
+
+void KeyBinder::stopPollingLoop() {
+    m_pollRunning = false;
+    if (m_pollThread.joinable()) {
+        m_pollThread.join();
+    }
 }
 
 void KeyBinder::installHook() {
@@ -270,8 +344,12 @@ bool KeyBinder::handleHookEvent(int vkCode, bool isDown) {
             bool hasWin = isWin && (vkCode != VK_LWIN && vkCode != VK_RWIN);
             if (needWin != hasWin) continue;
 
-            if (pair.second) {
-                callbacksToRun.push_back(pair.second);
+            uint64_t now = GetTickCount64();
+            if (now - s_lastTriggerTimes[action] > 180) {
+                s_lastTriggerTimes[action] = now;
+                if (pair.second) {
+                    callbacksToRun.push_back(pair.second);
+                }
             }
         }
     }

@@ -15,7 +15,7 @@ private:
     std::string analyzeOpenRouter(const std::string& imageBase64, const std::string& prompt);
     std::string buildUserPrompt(const std::string& prompt);
 
-    static std::string httpPost(const std::string& url, const std::string& jsonPayload, const std::string& authHeader, int timeoutSec);
+    std::string httpPost(const std::string& url, const std::string& jsonPayload, const std::string& authHeader, int timeoutSec);
 
     AppConfig m_config;
     ConversationMemory& m_memory;

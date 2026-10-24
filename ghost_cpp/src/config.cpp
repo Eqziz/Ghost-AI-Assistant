@@ -50,6 +50,7 @@ nlohmann::json AppConfig::toJson() const {
     j["ollama_model"] = ollama_model;
     j["openrouter_api_key"] = openrouter_api_key;
     j["openrouter_model"] = openrouter_model;
+    j["proxy_url"] = proxy_url;
     j["system_prompt"] = system_prompt;
     j["user_prompt"] = user_prompt;
     j["hotkeys"] = hotkeys;
@@ -78,6 +79,7 @@ AppConfig AppConfig::fromJson(const nlohmann::json& j) {
     if (j.contains("ollama_model")) cfg.ollama_model = j["ollama_model"].get<std::string>();
     if (j.contains("openrouter_api_key")) cfg.openrouter_api_key = j["openrouter_api_key"].get<std::string>();
     if (j.contains("openrouter_model")) cfg.openrouter_model = j["openrouter_model"].get<std::string>();
+    if (j.contains("proxy_url")) cfg.proxy_url = j["proxy_url"].get<std::string>();
     if (j.contains("system_prompt")) cfg.system_prompt = j["system_prompt"].get<std::string>();
     if (j.contains("user_prompt")) cfg.user_prompt = j["user_prompt"].get<std::string>();
     if (j.contains("kill_key")) cfg.kill_key = j["kill_key"].get<std::string>();
