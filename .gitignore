@@ -1,8 +1,12 @@
 # Build artifacts
 ghost_cpp/build/
+ghost_cpp/build_x64/
 ghost_cpp/driver_ring0/*.obj
 ghost_cpp/driver_ring0/*.pdb
 ghost_cpp/driver_ring0/*.cer
+ghost_cpp/Directory.Build.props
+Directory.Build.props
+sdk_test/
 *.obj
 *.pdb
 *.tlog
@@ -22,3 +26,8 @@ key.txt
 *.db
 bot/dist/
 .env
+
+# Proctor analysis & audit reports
+proctor/
+Audit_*.docx
+*.docx
