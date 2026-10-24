@@ -18,7 +18,6 @@
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dbghelp.lib")
 
-#ifdef _DEBUG
 namespace {
     void logStartupStep(const std::string& step) {
         std::ofstream ofs("ghost_startup.log", std::ios::app);
@@ -46,12 +45,8 @@ namespace {
     }
 }
 #define LOG_STEP(s) logStartupStep(s)
-#else
-#define LOG_STEP(s) ((void)0)
-#endif
 
 LONG WINAPI CrashFilter(EXCEPTION_POINTERS* pExceptionPointers) {
-#ifdef _DEBUG
     std::ofstream ofs("crash.log", std::ios::trunc);
     if (ofs.is_open()) {
         DWORD code = pExceptionPointers->ExceptionRecord->ExceptionCode;
@@ -116,9 +111,6 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* pExceptionPointers) {
             ofs << "\nMiniDump saved to: crash.dmp" << std::endl;
         }
     }
-#else
-    (void)pExceptionPointers;
-#endif
 
     return EXCEPTION_EXECUTE_HANDLER;
 }
@@ -191,14 +183,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             // Без драйвера: включаем Ring 3 защиту процесса через ограниченный DACL и маскировку PEB
             AntiAnalysis::protectProcessUserMode();
             AntiAnalysis::maskProcessParameters();
-            AntiAnalysis::maskPEHeader();
             LOG_STEP("DriverClient: Driver not found. Activated Ring 3 DACL & PEB mask.");
         }
     } catch (...) {
         AntiAnalysis::protectProcessUserMode();
         AntiAnalysis::maskProcessParameters();
-        AntiAnalysis::maskPEHeader();
         LOG_STEP("DriverClient: Exception while connecting to driver. Fallback to Ring 3 DACL & PEB mask.");
+    }
+
+    // Очистка очереди сообщений от остаточных WM_QUIT предыдущих модальных окон
+    MSG cleanMsg;
+    while (PeekMessage(&cleanMsg, NULL, 0, 0, PM_REMOVE)) {
+        if (cleanMsg.message != WM_QUIT) {
+            TranslateMessage(&cleanMsg);
+            DispatchMessage(&cleanMsg);
+        }
     }
 
     // 9. Запуск главного ассистента
