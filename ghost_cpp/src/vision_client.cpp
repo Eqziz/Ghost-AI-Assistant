@@ -31,6 +31,9 @@
 #endif
 
 std::string HttpResponse::getReasonString() const {
+    if (isTimeout()) {
+        return "Таймаут ожидания: нейросеть долго анализирует сложный вопрос (авто-переключение отключено)";
+    }
     if (winHttpError != 0) {
         return "WinHttp error " + std::to_string(winHttpError) + " (" + NetworkLogger::getWinHttpErrorString(winHttpError) + ")";
     }

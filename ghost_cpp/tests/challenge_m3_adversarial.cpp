@@ -305,7 +305,7 @@ void runSuite2_HttpResponseClassification() {
         HttpResponse r;
         r.statusCode = 0;
         r.winHttpError = 12002; // ERROR_WINHTTP_TIMEOUT
-        CHALLENGE_ASSERT(r.isTransient(), "WinHttp 12002 is transient");
+        CHALLENGE_ASSERT(!r.isTransient(), "WinHttp 12002 timeout is non-transient (no auto-failover on deep reasoning)");
     }
     {
         HttpResponse r;
@@ -325,7 +325,7 @@ void runSuite2_HttpResponseClassification() {
     {
         HttpResponse r;
         r.statusCode = 408;
-        CHALLENGE_ASSERT(r.isTransient(), "HTTP 408 Request Timeout is transient");
+        CHALLENGE_ASSERT(!r.isTransient(), "HTTP 408 Request Timeout is non-transient (no auto-failover on deep reasoning)");
     }
     {
         HttpResponse r;

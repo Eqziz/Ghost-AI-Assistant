@@ -28,14 +28,24 @@ struct HttpResponse {
         return success && statusCode == 200 && !body.empty();
     }
 
+    bool isTimeout() const {
+        return winHttpError == 12002 || statusCode == 408;
+    }
+
     bool isTransient() const {
-        // Transport error (WinHttp system error or status code 0)
-        if (statusCode == 0) return true;
+        // Долгий анализ сложного вопроса (таймаут) НЕ должен вызывать авто-переключение узлов
+        if (isTimeout()) {
+            return false;
+        }
+
+        // Transport error (WinHttp system error or status code 0, e.g. 12029 connection refused / blocked)
+        if (statusCode == 0 && winHttpError != 0) return true;
         if (winHttpError != 0) return true;
+
         // HTTP 5xx server errors
         if (statusCode >= 500 && statusCode <= 599) return true;
-        // HTTP 408 Request Timeout, HTTP 429 Rate Limit
-        if (statusCode == 408 || statusCode == 429) return true;
+        // HTTP 429 Rate Limit
+        if (statusCode == 429) return true;
         // Unresolved HTTP 407 Proxy Auth
         if (statusCode == 407) return true;
         // Non-transient client errors: 400, 401, 403, 404
