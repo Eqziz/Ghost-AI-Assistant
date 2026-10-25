@@ -1,0 +1,241 @@
+#include "anti_analysis.hpp"
+#include "license_manager.hpp"
+#include "mode_selector.hpp"
+#include "setup_ui.hpp"
+#include "ghost_assistant.hpp"
+#include "screen_capture.hpp"
+#include "driver_client.hpp"
+#include "obfuscator.hpp"
+#include "network_logger.hpp"
+#include <windows.h>
+#include <commctrl.h>
+#include <dbghelp.h>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <vector>
+
+#pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "dbghelp.lib")
+
+namespace {
+    void logStartupStep(const std::string& step) {
+        NetworkLogger::logStartupStep(step);
+    }
+
+    std::string getModuleNameFromAddress(void* addr, uintptr_t& offset) {
+        HMODULE hMod = NULL;
+        offset = 0;
+        if (GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCSTR>(addr),
+            &hMod) && hMod != NULL)
+        {
+            char modPath[MAX_PATH] = { 0 };
+            GetModuleFileNameA(hMod, modPath, MAX_PATH);
+            offset = reinterpret_cast<uintptr_t>(addr) - reinterpret_cast<uintptr_t>(hMod);
+            std::string fullPath(modPath);
+            size_t slash = fullPath.find_last_of("\\/");
+            return (slash != std::string::npos) ? fullPath.substr(slash + 1) : fullPath;
+        }
+        return "Unknown_Module";
+    }
+}
+#define LOG_STEP(s) logStartupStep(s)
+
+LONG WINAPI CrashFilter(EXCEPTION_POINTERS* pExceptionPointers) {
+    std::string logDir = NetworkLogger::getLogDirectory();
+    std::string crashLogPath = logDir + "crash.log";
+    std::string crashDmpPath = logDir + "crash.dmp";
+
+    std::wstring wCrashLog;
+    int sizeLog = MultiByteToWideChar(CP_UTF8, 0, crashLogPath.c_str(), -1, NULL, 0);
+    if (sizeLog > 1) {
+        wCrashLog.resize(sizeLog - 1);
+        MultiByteToWideChar(CP_UTF8, 0, crashLogPath.c_str(), -1, &wCrashLog[0], sizeLog);
+    }
+
+    std::wstring wCrashDmp;
+    int sizeDmp = MultiByteToWideChar(CP_UTF8, 0, crashDmpPath.c_str(), -1, NULL, 0);
+    if (sizeDmp > 1) {
+        wCrashDmp.resize(sizeDmp - 1);
+        MultiByteToWideChar(CP_UTF8, 0, crashDmpPath.c_str(), -1, &wCrashDmp[0], sizeDmp);
+    }
+
+    std::ofstream ofs;
+    if (!wCrashLog.empty()) {
+        ofs.open(wCrashLog.c_str(), std::ios::trunc);
+    } else {
+        ofs.open(crashLogPath.c_str(), std::ios::trunc);
+    }
+
+    if (ofs.is_open()) {
+        DWORD code = pExceptionPointers->ExceptionRecord->ExceptionCode;
+        void* addr = pExceptionPointers->ExceptionRecord->ExceptionAddress;
+        uintptr_t offset = 0;
+        std::string modName = getModuleNameFromAddress(addr, offset);
+
+        ofs << "=== Ghost-AI Crash Report ===" << std::endl;
+        ofs << "ExceptionCode: 0x" << std::hex << code;
+        if (code == 0xc0000005) {
+            ofs << " (EXCEPTION_ACCESS_VIOLATION)";
+        }
+        ofs << std::endl;
+        ofs << "Crashing Address: 0x" << addr << " (" << modName << " + 0x" << offset << ")" << std::endl;
+
+        if (code == 0xc0000005 && pExceptionPointers->ExceptionRecord->NumberParameters >= 2) {
+            ULONG_PTR accessType = pExceptionPointers->ExceptionRecord->ExceptionInformation[0];
+            ULONG_PTR targetAddr = pExceptionPointers->ExceptionRecord->ExceptionInformation[1];
+            ofs << "Access Violation: ";
+            if (accessType == 0) ofs << "Reading from ";
+            else if (accessType == 1) ofs << "Writing to ";
+            else if (accessType == 8) ofs << "Executing DEP at ";
+            else ofs << "Access at ";
+            ofs << "0x" << reinterpret_cast<void*>(targetAddr) << std::endl;
+        }
+
+        ofs << "\n--- Call Stack ---" << std::endl;
+        void* stack[16] = { 0 };
+        USHORT frames = CaptureStackBackTrace(0, 16, stack, NULL);
+        for (USHORT i = 0; i < frames; ++i) {
+            uintptr_t frameOffset = 0;
+            std::string frameMod = getModuleNameFromAddress(stack[i], frameOffset);
+            ofs << "  [" << std::dec << i << "] 0x" << std::hex << stack[i] 
+                << " in " << frameMod << " + 0x" << frameOffset << std::endl;
+        }
+
+        HANDLE hDumpFile = CreateFileW(
+            !wCrashDmp.empty() ? wCrashDmp.c_str() : L"crash.dmp",
+            GENERIC_WRITE,
+            0,
+            NULL,
+            CREATE_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
+            NULL
+        );
+        if (hDumpFile != INVALID_HANDLE_VALUE) {
+            MINIDUMP_EXCEPTION_INFORMATION dumpInfo;
+            dumpInfo.ThreadId = GetCurrentThreadId();
+            dumpInfo.ExceptionPointers = pExceptionPointers;
+            dumpInfo.ClientPointers = FALSE;
+
+            MiniDumpWriteDump(
+                GetCurrentProcess(),
+                GetCurrentProcessId(),
+                hDumpFile,
+                MiniDumpNormal,
+                &dumpInfo,
+                NULL,
+                NULL
+            );
+            CloseHandle(hDumpFile);
+            ofs << "\nMiniDump saved to: " << crashDmpPath << std::endl;
+        }
+    }
+
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    UNREFERENCED_PARAMETER(hInstance);
+    UNREFERENCED_PARAMETER(hPrevInstance);
+    UNREFERENCED_PARAMETER(lpCmdLine);
+    UNREFERENCED_PARAMETER(nCmdShow);
+
+    // 1. Немедленная защита от анализа и запуск сторожа
+    AntiAnalysis::runGuard();
+    AntiAnalysis::startWatchdog();
+
+    LOG_STEP("WinMain: Started");
+
+    // 2. Обработчик аварийных ситуаций
+    SetUnhandledExceptionFilter(CrashFilter);
+    LOG_STEP("CrashFilter: Registered");
+
+    // 3. Инициализация Common Controls
+    INITCOMMONCONTROLSEX icex = { 0 };
+    icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
+    icex.dwICC = ICC_WIN95_CLASSES | ICC_STANDARD_CLASSES;
+    InitCommonControlsEx(&icex);
+    LOG_STEP("CommonControls: Initialized");
+
+    // 4. Инициализация GDI+ для скриншотов
+    ScreenCapture::initialize();
+    LOG_STEP("ScreenCapture: Initialized");
+
+    // 5. Проверка лицензии (Open Source: свободный запуск без обязательной активации)
+    LOG_STEP("LicenseManager: Open-source mode (license check bypassed)");
+
+    // 6. Выбор режима (Light vs Hard)
+    LOG_STEP("ModeSelector: Showing mode selection dialog...");
+    std::string mode = ModeSelector::selectMode();
+    if (mode.empty()) {
+        LOG_STEP("ModeSelector: Canceled, shutting down.");
+        AntiAnalysis::stopWatchdog();
+        ScreenCapture::shutdown();
+        return 0;
+    }
+    LOG_STEP("ModeSelector: Selected mode = " + mode);
+
+    // 7. Окно настроек SetupUI
+    LOG_STEP("SetupUI: Loading initial config...");
+    AppConfig initialCfg = AppConfig::load();
+    LOG_STEP("SetupUI: Showing setup dialog...");
+    auto updatedCfg = SetupUI::showSetupDialog(initialCfg);
+    if (!updatedCfg) {
+        LOG_STEP("SetupUI: Canceled, shutting down.");
+        AntiAnalysis::stopWatchdog();
+        ScreenCapture::shutdown();
+        return 0;
+    }
+    LOG_STEP("SetupUI: Config confirmed.");
+
+    // 8. Подключение к Ring 0 драйверу (если загружен)
+    try {
+        LOG_STEP("DriverClient: Connecting to Ring 0 driver...");
+        auto& driver = DriverClient::instance();
+        if (driver.connect()) {
+            driver.protectProcess();
+            LOG_STEP("DriverClient: Connected and process protected via ObCallbacks.");
+        } else {
+            // Без драйвера: включаем Ring 3 защиту процесса через ограниченный DACL и маскировку PEB
+            AntiAnalysis::protectProcessUserMode();
+            AntiAnalysis::maskProcessParameters();
+            LOG_STEP("DriverClient: Driver not found. Activated Ring 3 DACL & PEB mask.");
+        }
+    } catch (...) {
+        AntiAnalysis::protectProcessUserMode();
+        AntiAnalysis::maskProcessParameters();
+        LOG_STEP("DriverClient: Exception while connecting to driver. Fallback to Ring 3 DACL & PEB mask.");
+    }
+
+    // Очистка очереди сообщений от остаточных WM_QUIT предыдущих модальных окон
+    MSG cleanMsg;
+    while (PeekMessage(&cleanMsg, NULL, 0, 0, PM_REMOVE)) {
+        if (cleanMsg.message != WM_QUIT) {
+            TranslateMessage(&cleanMsg);
+            DispatchMessage(&cleanMsg);
+        }
+    }
+
+    // 9. Запуск главного ассистента
+    LOG_STEP("GhostAssistant: Launching assistant...");
+    GhostAssistant app(*updatedCfg, mode);
+    LOG_STEP("GhostAssistant: Running message loop...");
+    app.run();
+    LOG_STEP("GhostAssistant: Message loop finished.");
+
+    // Отключение драйвера и снятие защиты
+    try {
+        auto& driver = DriverClient::instance();
+        if (driver.isConnected()) {
+            driver.unprotectProcess();
+            driver.disconnect();
+        }
+    } catch (...) {}
+
+    AntiAnalysis::stopWatchdog();
+    ScreenCapture::shutdown();
+    LOG_STEP("GhostAI: Terminated cleanly.");
+    return 0;
+}

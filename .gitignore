@@ -1,0 +1,42 @@
+# Build artifacts
+build/
+ghost_cpp/build/
+ghost_cpp/build_x64/
+ghost_cpp/driver_ring0/*.obj
+ghost_cpp/driver_ring0/*.pdb
+ghost_cpp/driver_ring0/*.cer
+ghost_cpp/Directory.Build.props
+Directory.Build.props
+sdk_test/
+*.obj
+*.pdb
+*.tlog
+*.recipe
+*.lastbuildstate
+*.log
+*.dmp
+ghost_cpp/tests/*.exe
+
+# Teamwork agent state
+.agents/
+
+# Editor & personal files
+.vscode/
+project_clean.txt
+key.txt
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local config & licenses
+.ghost_ai_config.json
+.ghost_ai_license.json
+key.txt
+*.db
+.env
+
+# Proctor analysis & audit reports
+proctor/
+Audit_*.docx
+*.docx
