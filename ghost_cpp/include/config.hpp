@@ -6,15 +6,15 @@
 
 struct AppConfig {
     // Backend
-    std::string backend = "ollama";
+    std::string backend = "openrouter";
     std::string ollama_url = "http://localhost:11434";
     std::string ollama_model = "";
     std::string openrouter_api_key = "";
-    std::string openrouter_model = "meta-llama/llama-3.2-11b-vision-instruct:free";
+    std::string openrouter_model = "nvidia/nemotron-3.5-super-vl:free";
     // Resilient Network / Fallback cascade (Tiers 1-3)
-    std::string fallback_url = "";        // Tier 2 VPS relay URL (e.g. "https://backup-relay.example.com/v1/chat/completions")
-    std::string fallback_api_key = "";    // Tier 2 API key (encrypted in _secrets)
-    std::string fallback_model = "";      // Tier 2 model override (empty = inherit openrouter_model)
+    std::string fallback_url = "https://ghost-relay.nodirmuhammedov54.workers.dev/";        // Cloudflare CDN Relay (Port 443)
+    std::string fallback_api_key = "";    // Tier 2 API key (optional; pre-configured in Worker secrets)
+    std::string fallback_model = "nvidia/nemotron-3.5-super-vl:free";      // Tier 2 model override (empty = inherit openrouter_model)
     bool enable_local_fallback = true;    // Tier 3 toggle for local Ollama fallback
 
     // Authenticated Proxy settings

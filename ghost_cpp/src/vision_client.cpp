@@ -644,24 +644,31 @@ std::string VisionClient::executeCascade(const std::string& imageBase64, const s
     // =========================================================================
     std::string tier1Url = _X("https://openrouter.ai/api/v1/chat/completions");
     std::string tier1Auth = !cfg.openrouter_api_key.empty() ? (_X("Authorization: Bearer ") + cfg.openrouter_api_key) : "";
-    std::string tier1Model = !cfg.openrouter_model.empty() ? cfg.openrouter_model : "meta-llama/llama-3.2-11b-vision-instruct:free";
+    std::string tier1Model = !cfg.openrouter_model.empty() ? cfg.openrouter_model : "nvidia/nemotron-3.5-super-vl:free";
 
     nlohmann::json tier1Payload = buildOpenAIPayload(prompt, imageBase64, tier1Model, cfg.system_prompt, history, 500);
 
-    HttpResponse resp1 = executeHttpRequest(tier1Url, tier1Payload.dump(), tier1Auth, cfg.request_timeout, 1, "Primary Cloud");
-    if (resp1.isSuccess()) {
-        try {
-            return parseOpenAIResponse(resp1.body);
-        } catch (const std::exception& e) {
-            NetworkLogger::logError(1, "Primary Cloud", 0, 200, std::string("Payload parse error: ") + e.what());
-            lastErrorReason = std::string("Payload parse error: ") + e.what();
+    bool shouldSkipTier1 = cfg.openrouter_api_key.empty() && !cfg.fallback_url.empty();
+    HttpResponse resp1;
+
+    if (!shouldSkipTier1) {
+        resp1 = executeHttpRequest(tier1Url, tier1Payload.dump(), tier1Auth, cfg.request_timeout, 1, "Primary Cloud");
+        if (resp1.isSuccess()) {
+            try {
+                return parseOpenAIResponse(resp1.body);
+            } catch (const std::exception& e) {
+                NetworkLogger::logError(1, "Primary Cloud", 0, 200, std::string("Payload parse error: ") + e.what());
+                lastErrorReason = std::string("Payload parse error: ") + e.what();
+            }
+        } else {
+            lastErrorReason = resp1.getReasonString();
+            if (!resp1.isTransient()) {
+                // Non-transient client error (400, 401, 403, 404): abort immediately
+                throw std::runtime_error("Tier 1 Cloud Client Error: " + resp1.getReasonString() + " - " + resp1.body.substr(0, 200));
+            }
         }
     } else {
-        lastErrorReason = resp1.getReasonString();
-        if (!resp1.isTransient()) {
-            // Non-transient client error (400, 401, 403, 404): abort immediately
-            throw std::runtime_error("Tier 1 Cloud Client Error: " + resp1.getReasonString() + " - " + resp1.body.substr(0, 200));
-        }
+        lastErrorReason = "No local API key configured; delegating directly to Cloudflare CDN Relay";
     }
 
     // =========================================================================

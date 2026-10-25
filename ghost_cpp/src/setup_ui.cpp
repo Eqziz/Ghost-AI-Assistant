@@ -226,17 +226,15 @@ namespace {
             SendMessage(s_edOpenRouterModel, WM_SETFONT, (WPARAM)s_fontNormal, TRUE);
 
             const wchar_t* PRESET_MODELS[] = {
-                L"meta-llama/llama-3.2-11b-vision-instruct:free",
-                L"meta-llama/llama-3.2-90b-vision-instruct",
+                L"nvidia/nemotron-3.5-super-vl:free",
+                L"google/gemini-2.0-flash-001",
                 L"anthropic/claude-3.5-sonnet",
                 L"anthropic/claude-3.5-haiku",
                 L"openai/gpt-4o",
                 L"openai/gpt-4o-mini",
-                L"google/gemini-2.0-flash-001",
-                L"google/gemini-pro-1.5",
                 L"qwen/qwen-2.5-vl-72b-instruct",
                 L"deepseek/deepseek-chat",
-                L"llama-4-scout"
+                L"meta-llama/llama-3.2-90b-vision-instruct"
             };
             for (const auto* m : PRESET_MODELS) {
                 SendMessageW(s_edOpenRouterModel, CB_ADDSTRING, 0, (LPARAM)m);
@@ -244,7 +242,7 @@ namespace {
 
             std::wstring initialModel = toWide(s_currentConfig.openrouter_model);
             if (initialModel.empty()) {
-                initialModel = L"meta-llama/llama-3.2-11b-vision-instruct:free";
+                initialModel = L"nvidia/nemotron-3.5-super-vl:free";
             }
             SetWindowTextW(s_edOpenRouterModel, initialModel.c_str());
 
