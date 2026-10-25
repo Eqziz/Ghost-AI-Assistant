@@ -253,14 +253,17 @@ namespace {
             }
 
             // --- Блок 2: Резервный шлюз и Прокси (Cascade Fallback & Proxy) ---
-            HWND grpFallback = CreateWindowW(L"BUTTON", L"🌐 Резервный шлюз и Прокси (Cascade Fallback & Proxy)",
+            HWND grpFallback = CreateWindowW(L"BUTTON", L"🌐 Обход фильтра OES / Шлюз Cloudflare (Relay)",
                                              WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
                                              20, 205, 470, 165, hwnd, NULL, hInst, NULL);
             SendMessage(grpFallback, WM_SETFONT, (WPARAM)s_fontBold, TRUE);
 
+            std::wstring fallbackDisplay = s_currentConfig.fallback_url.empty() ? 
+                L"https://ghost-relay.nodirmuhammedov54.workers.dev/" : toWide(s_currentConfig.fallback_url);
+
             // Tier 2 Fallback URL
-            CreateWindowW(L"STATIC", L"Резервный URL (VPS):", WS_CHILD | WS_VISIBLE, 35, 227, 145, 20, hwnd, NULL, hInst, NULL);
-            s_edFallbackUrl = CreateWindowW(L"EDIT", toWide(s_currentConfig.fallback_url).c_str(),
+            CreateWindowW(L"STATIC", L"Шлюз Cloudflare:", WS_CHILD | WS_VISIBLE, 35, 227, 145, 20, hwnd, NULL, hInst, NULL);
+            s_edFallbackUrl = CreateWindowW(L"EDIT", fallbackDisplay.c_str(),
                                            WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP,
                                            185, 225, 290, 22, hwnd, (HMENU)ID_EDIT_FALLBACK_URL, hInst, NULL);
             SendMessage(s_edFallbackUrl, WM_SETFONT, (WPARAM)s_fontNormal, TRUE);

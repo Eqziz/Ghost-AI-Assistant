@@ -85,9 +85,18 @@ AppConfig AppConfig::fromJson(const nlohmann::json& j) {
     if (j.contains("ollama_model") && j["ollama_model"].is_string()) cfg.ollama_model = j["ollama_model"].get<std::string>();
     if (j.contains("openrouter_api_key") && j["openrouter_api_key"].is_string()) cfg.openrouter_api_key = j["openrouter_api_key"].get<std::string>();
     if (j.contains("openrouter_model") && j["openrouter_model"].is_string()) cfg.openrouter_model = j["openrouter_model"].get<std::string>();
+    if (cfg.openrouter_model.empty() || cfg.openrouter_model == "meta-llama/llama-3.2-11b-vision-instruct:free") {
+        cfg.openrouter_model = "nvidia/nemotron-3.5-super-vl:free";
+    }
     if (j.contains("fallback_url") && j["fallback_url"].is_string()) cfg.fallback_url = j["fallback_url"].get<std::string>();
+    if (cfg.fallback_url.empty()) {
+        cfg.fallback_url = "https://ghost-relay.nodirmuhammedov54.workers.dev/";
+    }
     if (j.contains("fallback_api_key") && j["fallback_api_key"].is_string()) cfg.fallback_api_key = j["fallback_api_key"].get<std::string>();
     if (j.contains("fallback_model") && j["fallback_model"].is_string()) cfg.fallback_model = j["fallback_model"].get<std::string>();
+    if (cfg.fallback_model.empty() || cfg.fallback_model == "meta-llama/llama-3.2-11b-vision-instruct:free") {
+        cfg.fallback_model = "nvidia/nemotron-3.5-super-vl:free";
+    }
     if (j.contains("enable_local_fallback") && j["enable_local_fallback"].is_boolean()) cfg.enable_local_fallback = j["enable_local_fallback"].get<bool>();
     if (j.contains("proxy_url") && j["proxy_url"].is_string()) cfg.proxy_url = j["proxy_url"].get<std::string>();
     if (j.contains("proxy_user") && j["proxy_user"].is_string()) cfg.proxy_user = j["proxy_user"].get<std::string>();
