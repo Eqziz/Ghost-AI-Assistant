@@ -57,6 +57,7 @@ nlohmann::json AppConfig::toJson() const {
     j["proxy_url"] = proxy_url;
     j["proxy_user"] = proxy_user;
     j["proxy_pass"] = proxy_pass;
+    j["validate_tls"] = validate_tls;
     j["system_prompt"] = system_prompt;
     j["user_prompt"] = user_prompt;
     j["hotkeys"] = hotkeys;
@@ -101,6 +102,7 @@ AppConfig AppConfig::fromJson(const nlohmann::json& j) {
     if (j.contains("proxy_url") && j["proxy_url"].is_string()) cfg.proxy_url = j["proxy_url"].get<std::string>();
     if (j.contains("proxy_user") && j["proxy_user"].is_string()) cfg.proxy_user = j["proxy_user"].get<std::string>();
     if (j.contains("proxy_pass") && j["proxy_pass"].is_string()) cfg.proxy_pass = j["proxy_pass"].get<std::string>();
+    if (j.contains("validate_tls") && j["validate_tls"].is_boolean()) cfg.validate_tls = j["validate_tls"].get<bool>();
     if (j.contains("system_prompt") && j["system_prompt"].is_string()) cfg.system_prompt = j["system_prompt"].get<std::string>();
     if (j.contains("user_prompt") && j["user_prompt"].is_string()) cfg.user_prompt = j["user_prompt"].get<std::string>();
     if (j.contains("kill_key") && j["kill_key"].is_string()) cfg.kill_key = j["kill_key"].get<std::string>();

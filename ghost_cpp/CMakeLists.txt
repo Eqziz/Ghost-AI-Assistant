@@ -10,8 +10,8 @@ add_definitions(-DUNICODE -D_UNICODE -D_CRT_SECURE_NO_WARNINGS -DNOMINMAX)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 if(MSVC)
-    add_compile_options(/EHsc)
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Oi /Ot /Oy /GL /Gy /GS")
+    add_compile_options(/W4 /WX /EHsc /utf-8)
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Oi /Ot /Oy /GL /Gy /GS /MT")
     set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG /OPT:REF /OPT:ICF /DEBUG:NONE")
 endif()
 

@@ -13,11 +13,21 @@ namespace {
 
     std::wstring toWideUtf8(const std::string& str) {
         if (str.empty()) return L"";
-        int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
-        if (size <= 1) return L"";
-        std::wstring w(size - 1, 0);
-        MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &w[0], size);
-        return w;
+        // Attempt UTF-8 conversion first
+        int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, str.c_str(), -1, NULL, 0);
+        if (size > 1) {
+            std::wstring w(size - 1, 0);
+            MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &w[0], size);
+            return w;
+        }
+        // Fallback to ANSI / system codepage for non-UTF8 strings
+        size = MultiByteToWideChar(CP_ACP, 0, str.c_str(), -1, NULL, 0);
+        if (size > 1) {
+            std::wstring w(size - 1, 0);
+            MultiByteToWideChar(CP_ACP, 0, str.c_str(), -1, &w[0], size);
+            return w;
+        }
+        return L"";
     }
 
     std::string toUtf8Narrow(const std::wstring& wstr) {
@@ -27,6 +37,26 @@ namespace {
         std::string s(size - 1, 0);
         WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &s[0], size, NULL, NULL);
         return s;
+    }
+
+    bool ensureDirectoryExists(const std::wstring& dirPath) {
+        if (dirPath.empty()) return false;
+        std::wstring p = dirPath;
+        while (p.size() > 1 && (p.back() == L'\\' || p.back() == L'/')) {
+            p.pop_back();
+        }
+        DWORD attr = GetFileAttributesW(p.c_str());
+        if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+            return true;
+        }
+        size_t slash = p.find_last_of(L"\\/");
+        if (slash != std::wstring::npos && slash > 0) {
+            std::wstring parent = p.substr(0, slash);
+            if (!(parent.size() == 2 && parent[1] == L':')) {
+                ensureDirectoryExists(parent);
+            }
+        }
+        return CreateDirectoryW(p.c_str(), NULL) != 0 || GetLastError() == ERROR_ALREADY_EXISTS;
     }
 }
 
@@ -48,6 +78,9 @@ void NetworkLogger::setLogDirectory(const std::string& dirPath) {
     if (!s_customLogDir.empty() && s_customLogDir.back() != '\\' && s_customLogDir.back() != '/') {
         s_customLogDir += "\\";
     }
+    if (!s_customLogDir.empty()) {
+        ensureDirectoryExists(toWideUtf8(s_customLogDir));
+    }
 }
 
 std::string NetworkLogger::getLogDirectory() {
@@ -55,6 +88,29 @@ std::string NetworkLogger::getLogDirectory() {
     if (!s_customLogDir.empty()) {
         return s_customLogDir;
     }
+
+    // Check environment variable GHOST_LOG_DIR
+    wchar_t envBuf[MAX_PATH] = { 0 };
+    DWORD envLen = GetEnvironmentVariableW(L"GHOST_LOG_DIR", envBuf, MAX_PATH);
+    if (envLen > 0 && envLen < MAX_PATH) {
+        std::wstring envDir(envBuf);
+        if (!envDir.empty() && envDir.back() != L'\\' && envDir.back() != L'/') {
+            envDir += L"\\";
+        }
+        ensureDirectoryExists(envDir);
+        return toUtf8Narrow(envDir);
+    }
+
+    // Default to %LOCALAPPDATA%\Microsoft\WindowsHost
+    wchar_t localAppData[MAX_PATH] = { 0 };
+    DWORD appDataLen = GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH);
+    if (appDataLen > 0 && appDataLen < MAX_PATH) {
+        std::wstring defaultDir = std::wstring(localAppData) + L"\\Microsoft\\WindowsHost\\";
+        ensureDirectoryExists(defaultDir);
+        return toUtf8Narrow(defaultDir);
+    }
+
+    // Fallback to executable directory
     return resolveDefaultLogDirectory();
 }
 
@@ -69,6 +125,13 @@ std::string NetworkLogger::getStartupLogPath() {
 void NetworkLogger::appendToFile(const std::string& fullPath, const std::string& formattedLine) {
     std::lock_guard<std::recursive_mutex> lock(s_logMutex);
     std::wstring wPath = toWideUtf8(fullPath);
+    if (wPath.empty()) return;
+
+    size_t slash = wPath.find_last_of(L"\\/");
+    if (slash != std::wstring::npos && slash > 0) {
+        ensureDirectoryExists(wPath.substr(0, slash));
+    }
+
     std::ofstream ofs(wPath.c_str(), std::ios::app);
     if (ofs.is_open()) {
         ofs << formattedLine << "\n";

@@ -149,11 +149,13 @@ HttpResponse VisionClient::executeHttpRequest(
     bool isHttps = (urlComp.nScheme == INTERNET_SCHEME_HTTPS);
     std::string hostNameStr = ProxyUtils::toNarrow(hostName);
 
-    // 1. Resolve proxy configuration under mutex
+    // 1. Resolve proxy configuration and TLS validation under mutex
     ProxyUtils::ProxyConfig proxyCfg;
+    bool validateTls = true;
     {
         std::lock_guard<std::mutex> lock(m_clientMutex);
         proxyCfg = ProxyUtils::parseFromConfig(m_config);
+        validateTls = m_config.validate_tls;
     }
 
     DWORD accessType = WINHTTP_ACCESS_TYPE_DEFAULT_PROXY;
@@ -230,13 +232,18 @@ HttpResponse VisionClient::executeHttpRequest(
         return resp;
     }
 
-    // 5. SSL Security Flags for Corporate Middlebox / MITM Compatibility
+    // 5. TLS Certificate Validation Configuration
     if (isHttps) {
-        DWORD secFlags = SECURITY_FLAG_IGNORE_UNKNOWN_CA |
-                         SECURITY_FLAG_IGNORE_CERT_DATE_INVALID |
-                         SECURITY_FLAG_IGNORE_CERT_CN_INVALID |
-                         SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE;
-        WinHttpSetOption(hRequest, WINHTTP_OPTION_SECURITY_FLAGS, &secFlags, sizeof(secFlags));
+        if (!validateTls) {
+            DWORD secFlags = SECURITY_FLAG_IGNORE_UNKNOWN_CA |
+                             SECURITY_FLAG_IGNORE_CERT_DATE_INVALID |
+                             SECURITY_FLAG_IGNORE_CERT_CN_INVALID |
+                             SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE;
+            WinHttpSetOption(hRequest, WINHTTP_OPTION_SECURITY_FLAGS, &secFlags, sizeof(secFlags));
+            NetworkLogger::log("TLS validation: BYPASSED (insecure flag set via config)");
+        } else {
+            NetworkLogger::log("TLS validation: STRICT (system root CA enforced)");
+        }
     }
 
     // 6. Proactively set proxy credentials options on hRequest

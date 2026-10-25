@@ -22,7 +22,7 @@ void testCaseSensitivityAndCyrillic() {
     GetTempPathA(MAX_PATH, tempPath);
     std::string cyrillicDir = std::string(tempPath) + "ghost_логи_тест";
     int wlen = MultiByteToWideChar(CP_UTF8, 0, cyrillicDir.c_str(), -1, NULL, 0);
-    std::wstring wDir(wlen, 0);
+    std::wstring wDir(wlen > 1 ? wlen - 1 : 0, 0);
     MultiByteToWideChar(CP_UTF8, 0, cyrillicDir.c_str(), -1, &wDir[0], wlen);
     CreateDirectoryW(wDir.c_str(), NULL);
 

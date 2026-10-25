@@ -5,7 +5,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-cd /d "c:\Users\nodir\Desktop\project 2\ghost_cpp"
+cd /d "%~dp0.."
 
 cl /EHsc /std:c++17 /utf-8 /MT /O2 /I"include" ^
   /I"C:\Users\nodir\Desktop\project 2\SDK_TEST\WINDOWS KITS\10\INCLUDE\10.0.26100.0\UCRT" ^

@@ -2,7 +2,13 @@
 #include <algorithm>
 #include <thread>
 #include <chrono>
+#include <bcrypt.h>
 
+#pragma comment(lib, "bcrypt.lib")
+
+#ifndef WDA_MONITOR
+#define WDA_MONITOR 0x00000001
+#endif
 #ifndef WDA_EXCLUDEFROMCAPTURE
 #define WDA_EXCLUDEFROMCAPTURE 0x00000011
 #endif
@@ -12,8 +18,20 @@
 
 namespace {
     const UINT_PTR TIMER_HARD_AUTO_HIDE = 1001;
-    const wchar_t* GHOST_WINDOW_CLASS = L"NativeHWNDHost";
-    bool g_classRegistered = false;
+
+    std::wstring generateUniqueClassName(const std::wstring& prefix = L"SysHost_") {
+        uint8_t randBytes[8] = { 0 };
+        if (!BCRYPT_SUCCESS(BCryptGenRandom(NULL, randBytes, sizeof(randBytes), BCRYPT_USE_SYSTEM_PREFERRED_RNG))) {
+            uint64_t tick = GetTickCount64() ^ (static_cast<uint64_t>(GetCurrentProcessId()) << 32);
+            memcpy(randBytes, &tick, sizeof(randBytes));
+        }
+        wchar_t buf[64];
+        swprintf_s(buf, L"%s%02X%02X%02X%02X%02X%02X%02X%02X",
+                   prefix.c_str(),
+                   randBytes[0], randBytes[1], randBytes[2], randBytes[3],
+                   randBytes[4], randBytes[5], randBytes[6], randBytes[7]);
+        return std::wstring(buf);
+    }
 }
 
 GhostUI::GhostUI(double alpha, double alphaMin, double alphaMax, const std::string& mode)
@@ -22,22 +40,20 @@ GhostUI::GhostUI(double alpha, double alphaMin, double alphaMax, const std::stri
     m_alpha = (std::max)(alphaMin, (std::min)(alpha, alphaMax));
     m_savedAlpha = m_alpha;
 
+    m_className = generateUniqueClassName(L"SysHost_");
     HINSTANCE hInstance = GetModuleHandle(NULL);
-    if (!g_classRegistered) {
-        WNDCLASSEXW wc = { 0 };
-        wc.cbSize = sizeof(WNDCLASSEXW);
-        wc.lpfnWndProc = GhostUI::WndProc;
-        wc.hInstance = hInstance;
-        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-        wc.lpszClassName = GHOST_WINDOW_CLASS;
-        RegisterClassExW(&wc);
-        g_classRegistered = true;
-    }
+    WNDCLASSEXW wc = { 0 };
+    wc.cbSize = sizeof(WNDCLASSEXW);
+    wc.lpfnWndProc = GhostUI::WndProc;
+    wc.hInstance = hInstance;
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.lpszClassName = m_className.c_str();
+    RegisterClassExW(&wc);
 
     DWORD exStyle = WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW;
     m_hwnd = CreateWindowExW(
         exStyle,
-        GHOST_WINDOW_CLASS,
+        m_className.c_str(),
         L"",
         WS_POPUP,
         100, 100, m_width, m_height,
@@ -67,21 +83,30 @@ GhostUI::GhostUI(double alpha, double alphaMin, double alphaMax, const std::stri
 
 GhostUI::~GhostUI() {
     destroy();
-}
-
-void GhostUI::destroy() {
-    if (m_hwnd) {
-        DWORD winThreadId = GetWindowThreadProcessId(m_hwnd, NULL);
-        if (winThreadId != GetCurrentThreadId()) {
-            PostMessage(m_hwnd, WM_CLOSE, 0, 0);
-        } else {
-            DestroyWindow(m_hwnd);
-            m_hwnd = NULL;
-        }
-    }
     if (m_font) {
         DeleteObject(m_font);
         m_font = NULL;
+    }
+    if (!m_className.empty()) {
+        UnregisterClassW(m_className.c_str(), GetModuleHandle(NULL));
+        m_className.clear();
+    }
+}
+
+void GhostUI::destroy() {
+    HWND hwnd = m_hwnd;
+    if (hwnd && IsWindow(hwnd)) {
+        DWORD winThreadId = GetWindowThreadProcessId(hwnd, NULL);
+        if (winThreadId != GetCurrentThreadId()) {
+            PostMessage(hwnd, WM_CLOSE, 0, 0);
+        } else {
+            m_hwnd = NULL;
+            DestroyWindow(hwnd);
+            if (!m_className.empty()) {
+                UnregisterClassW(m_className.c_str(), GetModuleHandle(NULL));
+                m_className.clear();
+            }
+        }
     }
 }
 
@@ -92,7 +117,10 @@ void GhostUI::activateStealth() {
 void GhostUI::setStealth(bool enable) {
     if (!m_hwnd) return;
     DWORD flag = enable ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE;
-    SetWindowDisplayAffinity(m_hwnd, flag);
+    BOOL success = SetWindowDisplayAffinity(m_hwnd, flag);
+    if (!success) {
+        SetWindowDisplayAffinity(m_hwnd, enable ? WDA_MONITOR : WDA_NONE);
+    }
     m_isStealth = enable;
 }
 
@@ -154,6 +182,7 @@ void GhostUI::getGeometry(int& x, int& y, int& width, int& height) {
 
 void GhostUI::setAlpha(double alpha) {
     m_alpha = (std::max)(m_alphaMin, (std::min)(alpha, m_alphaMax));
+    m_savedAlpha = m_alpha;
     if (m_hwnd && !m_isInvisible) {
         SetLayeredWindowAttributes(m_hwnd, 0, (BYTE)(m_alpha * 255.0), LWA_ALPHA);
     }
@@ -216,6 +245,10 @@ void GhostUI::runMessageLoop() {
     while (GetMessage(&msg, NULL, 0, 0)) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
+    }
+    if (!m_className.empty()) {
+        UnregisterClassW(m_className.c_str(), GetModuleHandle(NULL));
+        m_className.clear();
     }
 }
 
@@ -376,10 +409,19 @@ LRESULT CALLBACK GhostUI::WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
         DestroyWindow(hwnd);
         return 0;
 
-    case WM_DESTROY:
+    case WM_DESTROY: {
+        self = reinterpret_cast<GhostUI*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+        if (self) {
+            self->m_hwnd = NULL;
+            if (self->m_font) {
+                DeleteObject(self->m_font);
+                self->m_font = NULL;
+            }
+        }
         SetWindowLongPtr(hwnd, GWLP_USERDATA, 0);
         PostQuitMessage(0);
         return 0;
+    }
     }
 
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);

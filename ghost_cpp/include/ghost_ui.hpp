@@ -4,6 +4,7 @@
 #include <string>
 #include <functional>
 #include <mutex>
+#include <atomic>
 
 enum class WindowState {
     IDLE,
@@ -50,26 +51,28 @@ public:
     void runMessageLoop();
 
     HWND getHwnd() const { return m_hwnd; }
-    bool isFollowing() const { return m_isFollowing; }
+    const std::wstring& getClassName() const { return m_className; }
+    bool isFollowing() const { return m_isFollowing.load(); }
 
 private:
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
     void onPaint(HDC hdc);
 
+    std::wstring m_className;
     HWND m_hwnd = NULL;
     HFONT m_font = NULL;
     std::string m_mode = "light";
-    WindowState m_state = WindowState::IDLE;
+    std::atomic<WindowState> m_state{ WindowState::IDLE };
 
     double m_alpha = 0.5;
     double m_alphaMin = 0.05;
     double m_alphaMax = 1.0;
     double m_savedAlpha = 0.5;
 
-    bool m_isFollowing = true;
-    bool m_isClickthrough = false;
-    bool m_isInvisible = false;
-    bool m_isStealth = false;
+    std::atomic<bool> m_isFollowing{ true };
+    std::atomic<bool> m_isClickthrough{ false };
+    std::atomic<bool> m_isInvisible{ false };
+    std::atomic<bool> m_isStealth{ false };
 
     int m_width = DEFAULT_WIDTH;
     int m_height = DEFAULT_HEIGHT;

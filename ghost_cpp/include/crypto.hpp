@@ -2,7 +2,13 @@
 
 #include <string>
 #include <vector>
+#if defined(_MSC_VER)
+#pragma warning(push, 0)
+#endif
 #include "json.hpp"
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 namespace Crypto {
     // Вычисление SHA256 хэша от данных (возвращает бинарные байты)

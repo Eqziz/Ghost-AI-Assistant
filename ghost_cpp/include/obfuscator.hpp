@@ -84,20 +84,23 @@ private:
 
 } // namespace Obfuscation
 
-// Encrypted string macros: returns temporary std::string or std::wstring
-#define _X(s) ([]() -> std::string { \
+// Encrypted string macros: returns static const std::string& or const std::wstring& with program-lifetime storage
+#define _X(s) ([]() -> const std::string& { \
     constexpr uint32_t k = (Obfuscation::getTimeSeed() ^ (__LINE__ * 2654435761u)); \
     constexpr Obfuscation::ObfStringA<sizeof(s), k> obf(s); \
-    return obf.decrypt(); \
+    static const std::string decrypted = obf.decrypt(); \
+    return decrypted; \
 }())
 
-#define _XW(s) ([]() -> std::wstring { \
+#define _XW(s) ([]() -> const std::wstring& { \
     constexpr uint32_t k = (Obfuscation::getTimeSeed() ^ (__LINE__ * 2654435761u)); \
     constexpr Obfuscation::ObfStringW<sizeof(s) / sizeof(wchar_t), k> obf(s); \
-    return obf.decrypt(); \
+    static const std::wstring decrypted = obf.decrypt(); \
+    return decrypted; \
 }())
 
-// Shorthand for const char* / const wchar_t* in expressions
-#define _XC(s) _X(s).c_str()
-#define _XWC(s) _XW(s).c_str()
+// Shorthand for const char* / const wchar_t* in expressions (pointing to static storage)
+#define _XC(s) (_X(s).c_str())
+#define _XWC(s) (_XW(s).c_str())
+
 

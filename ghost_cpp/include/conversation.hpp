@@ -4,7 +4,13 @@
 #include <vector>
 #include <deque>
 #include <mutex>
+#if defined(_MSC_VER)
+#pragma warning(push, 0)
+#endif
 #include "json.hpp"
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 struct Turn {
     std::string timestamp;

@@ -28,6 +28,7 @@ private:
 
     AppConfig m_config;
     std::string m_mode;
+    DWORD m_mainThreadId = 0;
     std::atomic<bool> m_running{ true };
     std::atomic<bool> m_isProcessing{ false };
 

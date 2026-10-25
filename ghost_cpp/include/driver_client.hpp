@@ -52,7 +52,7 @@ public:
         DWORD bytesReturned = 0;
         BOOL ok = DeviceIoControl(
             m_hDevice,
-            IOCTL_GHOST_PROTECT_PROCESS,
+            static_cast<DWORD>(IOCTL_GHOST_PROTECT_PROCESS),
             &req, sizeof(req),
             NULL, 0,
             &bytesReturned, NULL
@@ -74,7 +74,7 @@ public:
         DWORD bytesReturned = 0;
         BOOL ok = DeviceIoControl(
             m_hDevice,
-            IOCTL_GHOST_PROTECT_PROCESS,
+            static_cast<DWORD>(IOCTL_GHOST_PROTECT_PROCESS),
             &req, sizeof(req),
             NULL, 0,
             &bytesReturned, NULL
@@ -101,7 +101,7 @@ public:
         DWORD bytesReturned = 0;
         BOOL ok = DeviceIoControl(
             m_hDevice,
-            IOCTL_GHOST_HIDE_PROCESS_TIMED,
+            static_cast<DWORD>(IOCTL_GHOST_HIDE_PROCESS_TIMED),
             &req, sizeof(req),
             NULL, 0,
             &bytesReturned, NULL

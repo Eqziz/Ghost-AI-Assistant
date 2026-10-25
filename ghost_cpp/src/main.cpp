@@ -45,7 +45,31 @@ namespace {
 #define LOG_STEP(s) logStartupStep(s)
 
 LONG WINAPI CrashFilter(EXCEPTION_POINTERS* pExceptionPointers) {
-    std::ofstream ofs("crash.log", std::ios::trunc);
+    std::string logDir = NetworkLogger::getLogDirectory();
+    std::string crashLogPath = logDir + "crash.log";
+    std::string crashDmpPath = logDir + "crash.dmp";
+
+    std::wstring wCrashLog;
+    int sizeLog = MultiByteToWideChar(CP_UTF8, 0, crashLogPath.c_str(), -1, NULL, 0);
+    if (sizeLog > 1) {
+        wCrashLog.resize(sizeLog - 1);
+        MultiByteToWideChar(CP_UTF8, 0, crashLogPath.c_str(), -1, &wCrashLog[0], sizeLog);
+    }
+
+    std::wstring wCrashDmp;
+    int sizeDmp = MultiByteToWideChar(CP_UTF8, 0, crashDmpPath.c_str(), -1, NULL, 0);
+    if (sizeDmp > 1) {
+        wCrashDmp.resize(sizeDmp - 1);
+        MultiByteToWideChar(CP_UTF8, 0, crashDmpPath.c_str(), -1, &wCrashDmp[0], sizeDmp);
+    }
+
+    std::ofstream ofs;
+    if (!wCrashLog.empty()) {
+        ofs.open(wCrashLog.c_str(), std::ios::trunc);
+    } else {
+        ofs.open(crashLogPath.c_str(), std::ios::trunc);
+    }
+
     if (ofs.is_open()) {
         DWORD code = pExceptionPointers->ExceptionRecord->ExceptionCode;
         void* addr = pExceptionPointers->ExceptionRecord->ExceptionAddress;
@@ -81,8 +105,8 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* pExceptionPointers) {
                 << " in " << frameMod << " + 0x" << frameOffset << std::endl;
         }
 
-        HANDLE hDumpFile = CreateFileA(
-            "crash.dmp",
+        HANDLE hDumpFile = CreateFileW(
+            !wCrashDmp.empty() ? wCrashDmp.c_str() : L"crash.dmp",
             GENERIC_WRITE,
             0,
             NULL,
@@ -106,7 +130,7 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* pExceptionPointers) {
                 NULL
             );
             CloseHandle(hDumpFile);
-            ofs << "\nMiniDump saved to: crash.dmp" << std::endl;
+            ofs << "\nMiniDump saved to: " << crashDmpPath << std::endl;
         }
     }
 
@@ -114,6 +138,11 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* pExceptionPointers) {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    UNREFERENCED_PARAMETER(hInstance);
+    UNREFERENCED_PARAMETER(hPrevInstance);
+    UNREFERENCED_PARAMETER(lpCmdLine);
+    UNREFERENCED_PARAMETER(nCmdShow);
+
     // 1. Немедленная защита от анализа и запуск сторожа
     AntiAnalysis::runGuard();
     AntiAnalysis::startWatchdog();
@@ -155,6 +184,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // 6. Выбор режима (Light vs Hard)
     LOG_STEP("ModeSelector: Showing mode selection dialog...");
     std::string mode = ModeSelector::selectMode();
+    if (mode.empty()) {
+        LOG_STEP("ModeSelector: Canceled, shutting down.");
+        AntiAnalysis::stopWatchdog();
+        ScreenCapture::shutdown();
+        return 0;
+    }
     LOG_STEP("ModeSelector: Selected mode = " + mode);
 
     // 7. Окно настроек SetupUI

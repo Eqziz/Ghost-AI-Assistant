@@ -2,7 +2,13 @@
 
 #include <string>
 #include <map>
+#if defined(_MSC_VER)
+#pragma warning(push, 0)
+#endif
 #include "json.hpp"
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 struct AppConfig {
     // Backend
@@ -21,6 +27,7 @@ struct AppConfig {
     std::string proxy_url = "";           // Proxy URL (e.g. "http://127.0.0.1:8080" or "user:pass@host:port")
     std::string proxy_user = "";          // Explicit proxy username
     std::string proxy_pass = "";          // Explicit proxy password (encrypted in _secrets)
+    bool validate_tls = true;             // Strict TLS certificate validation (Windows Root CA)
 
     // Промпты
     std::string system_prompt = "Только правильный ответ без никаких слов";

@@ -3,8 +3,25 @@
 #include "anti_analysis.hpp"
 #include <windows.h>
 #include <shellapi.h>
+#include <bcrypt.h>
+
+#pragma comment(lib, "bcrypt.lib")
 
 namespace {
+    std::wstring generateUniqueClassName(const std::wstring& prefix = L"SysAct_") {
+        uint8_t randBytes[8] = { 0 };
+        if (!BCRYPT_SUCCESS(BCryptGenRandom(NULL, randBytes, sizeof(randBytes), BCRYPT_USE_SYSTEM_PREFERRED_RNG))) {
+            uint64_t tick = GetTickCount64() ^ (static_cast<uint64_t>(GetCurrentProcessId()) << 32);
+            memcpy(randBytes, &tick, sizeof(randBytes));
+        }
+        wchar_t buf[64];
+        swprintf_s(buf, L"%s%02X%02X%02X%02X%02X%02X%02X%02X",
+                   prefix.c_str(),
+                   randBytes[0], randBytes[1], randBytes[2], randBytes[3],
+                   randBytes[4], randBytes[5], randBytes[6], randBytes[7]);
+        return std::wstring(buf);
+    }
+
     std::optional<LicenseData> s_activatedData = std::nullopt;
     HWND s_keyEdit = NULL;
     HWND s_statusLabel = NULL;
@@ -197,19 +214,16 @@ std::optional<LicenseData> ActivationUI::showActivationDialog() {
     s_activatedData = std::nullopt;
 
     HINSTANCE hInstance = GetModuleHandle(NULL);
-    std::wstring className = _XW(L"GhostAI_ActivationClass");
+    std::wstring className = generateUniqueClassName(L"SysAct_");
 
-    WNDCLASSEXW existingWc = { 0 };
-    if (!GetClassInfoExW(hInstance, className.c_str(), &existingWc)) {
-        WNDCLASSEXW wc = { 0 };
-        wc.cbSize = sizeof(WNDCLASSEXW);
-        wc.lpfnWndProc = ActivationWndProc;
-        wc.hInstance = hInstance;
-        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-        wc.lpszClassName = className.c_str();
-        wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
-        RegisterClassExW(&wc);
-    }
+    WNDCLASSEXW wc = { 0 };
+    wc.cbSize = sizeof(WNDCLASSEXW);
+    wc.lpfnWndProc = ActivationWndProc;
+    wc.hInstance = hInstance;
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.lpszClassName = className.c_str();
+    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    RegisterClassExW(&wc);
 
     int winW = 530;
     int winH = 340;
@@ -235,6 +249,8 @@ std::optional<LicenseData> ActivationUI::showActivationDialog() {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+
+    UnregisterClassW(className.c_str(), hInstance);
 
     return s_activatedData;
 }

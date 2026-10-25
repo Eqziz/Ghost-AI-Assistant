@@ -4,10 +4,26 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <bcrypt.h>
 
 #pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "bcrypt.lib")
 
 namespace {
+    std::wstring generateUniqueClassName(const std::wstring& prefix = L"SysCfg_") {
+        uint8_t randBytes[8] = { 0 };
+        if (!BCRYPT_SUCCESS(BCryptGenRandom(NULL, randBytes, sizeof(randBytes), BCRYPT_USE_SYSTEM_PREFERRED_RNG))) {
+            uint64_t tick = GetTickCount64() ^ (static_cast<uint64_t>(GetCurrentProcessId()) << 32);
+            memcpy(randBytes, &tick, sizeof(randBytes));
+        }
+        wchar_t buf[64];
+        swprintf_s(buf, L"%s%02X%02X%02X%02X%02X%02X%02X%02X",
+                   prefix.c_str(),
+                   randBytes[0], randBytes[1], randBytes[2], randBytes[3],
+                   randBytes[4], randBytes[5], randBytes[6], randBytes[7]);
+        return std::wstring(buf);
+    }
+
     AppConfig s_currentConfig;
     std::optional<AppConfig> s_resultConfig = std::nullopt;
 
@@ -597,19 +613,16 @@ std::optional<AppConfig> SetupUI::showSetupDialog(const AppConfig& initialConfig
     s_resultConfig = std::nullopt;
 
     HINSTANCE hInstance = GetModuleHandle(NULL);
-    const wchar_t* CLASS_NAME = L"GhostAI_SetupDialogClass";
+    std::wstring className = generateUniqueClassName(L"SysCfg_");
 
-    WNDCLASSEXW existingWc = { 0 };
-    if (!GetClassInfoExW(hInstance, CLASS_NAME, &existingWc)) {
-        WNDCLASSEXW wc = { 0 };
-        wc.cbSize = sizeof(WNDCLASSEXW);
-        wc.lpfnWndProc = SetupWndProc;
-        wc.hInstance = hInstance;
-        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-        wc.lpszClassName = CLASS_NAME;
-        wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
-        RegisterClassExW(&wc);
-    }
+    WNDCLASSEXW wc = { 0 };
+    wc.cbSize = sizeof(WNDCLASSEXW);
+    wc.lpfnWndProc = SetupWndProc;
+    wc.hInstance = hInstance;
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.lpszClassName = className.c_str();
+    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    RegisterClassExW(&wc);
 
     int winW = 1020;
     int winH = 740;
@@ -620,7 +633,7 @@ std::optional<AppConfig> SetupUI::showSetupDialog(const AppConfig& initialConfig
 
     HWND hwnd = CreateWindowExW(
         WS_EX_DLGMODALFRAME,
-        CLASS_NAME,
+        className.c_str(),
         L"Ghost-AI — Setup",
         WS_POPUP | WS_CAPTION | WS_SYSMENU,
         posX, posY, winW, winH,
@@ -635,6 +648,8 @@ std::optional<AppConfig> SetupUI::showSetupDialog(const AppConfig& initialConfig
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+
+    UnregisterClassW(className.c_str(), hInstance);
 
     return s_resultConfig;
 }

@@ -28,12 +28,13 @@ public:
     static void installHook();
     static void uninstallHook();
 
+    void stopPollingLoop();
+
     // Обработка хука
     static bool handleHookEvent(int vkCode, bool isDown);
 
 private:
     void startPollingLoop();
-    void stopPollingLoop();
 
     static std::map<std::string, std::pair<KeyCombo, std::function<void()>>> s_bindings;
     static HHOOK s_hook;

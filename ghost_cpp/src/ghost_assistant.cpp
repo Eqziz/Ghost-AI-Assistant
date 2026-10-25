@@ -5,7 +5,7 @@
 #include <iostream>
 
 GhostAssistant::GhostAssistant(AppConfig config, const std::string& mode)
-    : m_config(config), m_mode(mode)
+    : m_config(config), m_mode(mode), m_mainThreadId(GetCurrentThreadId())
 {
     if (m_mode == "hard") {
         m_config.system_prompt =
@@ -243,10 +243,12 @@ void GhostAssistant::killApp() {
         }
     } catch (...) {}
 
-    if (m_ui) {
-        m_ui->destroy();
+    HWND hwnd = m_ui ? m_ui->getHwnd() : NULL;
+    if (hwnd && IsWindow(hwnd)) {
+        PostMessage(hwnd, WM_CLOSE, 0, 0);
+    } else if (m_mainThreadId != 0) {
+        PostThreadMessage(m_mainThreadId, WM_QUIT, 0, 0);
     }
-    ExitProcess(0);
 }
 
 void GhostAssistant::shutdown() {
@@ -261,7 +263,10 @@ void GhostAssistant::shutdown() {
         m_workerThread.join();
     }
     if (m_binder) {
+        m_binder->stopPollingLoop();
         m_binder->unregisterAll();
+        KeyBinder::uninstallHook();
+        m_binder.reset();
     }
     if (m_ui) {
         m_ui->destroy();
