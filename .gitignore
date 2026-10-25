@@ -1,4 +1,5 @@
 # Build artifacts
+build/
 ghost_cpp/build/
 ghost_cpp/build_x64/
 ghost_cpp/driver_ring0/*.obj
@@ -14,6 +15,10 @@ sdk_test/
 *.lastbuildstate
 *.log
 *.dmp
+ghost_cpp/tests/*.exe
+
+# Teamwork agent state
+.agents/
 
 # Python cache
 __pycache__/

@@ -32,7 +32,15 @@ GhostAssistant::GhostAssistant(AppConfig config, const std::string& mode)
         m_config.persist_context
     );
 
-    m_client = std::make_unique<VisionClient>(m_config, *m_memory);
+    m_client = std::make_unique<VisionClient>(
+        m_config,
+        *m_memory,
+        [this](const std::string& msg) {
+            if (m_ui) {
+                m_ui->log(msg);
+            }
+        }
+    );
     if (m_mode != "hard") {
         m_binder = std::make_unique<KeyBinder>();
     }

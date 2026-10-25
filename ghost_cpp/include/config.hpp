@@ -11,7 +11,16 @@ struct AppConfig {
     std::string ollama_model = "";
     std::string openrouter_api_key = "";
     std::string openrouter_model = "meta-llama/llama-3.2-11b-vision-instruct:free";
-    std::string proxy_url = ""; // Прокси для обхода сетевых ограничений (например, "http://127.0.0.1:8080")
+    // Resilient Network / Fallback cascade (Tiers 1-3)
+    std::string fallback_url = "";        // Tier 2 VPS relay URL (e.g. "https://backup-relay.example.com/v1/chat/completions")
+    std::string fallback_api_key = "";    // Tier 2 API key (encrypted in _secrets)
+    std::string fallback_model = "";      // Tier 2 model override (empty = inherit openrouter_model)
+    bool enable_local_fallback = true;    // Tier 3 toggle for local Ollama fallback
+
+    // Authenticated Proxy settings
+    std::string proxy_url = "";           // Proxy URL (e.g. "http://127.0.0.1:8080" or "user:pass@host:port")
+    std::string proxy_user = "";          // Explicit proxy username
+    std::string proxy_pass = "";          // Explicit proxy password (encrypted in _secrets)
 
     // Промпты
     std::string system_prompt = "Только правильный ответ без никаких слов";

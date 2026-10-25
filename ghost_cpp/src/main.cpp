@@ -7,6 +7,7 @@
 #include "screen_capture.hpp"
 #include "driver_client.hpp"
 #include "obfuscator.hpp"
+#include "network_logger.hpp"
 #include <windows.h>
 #include <commctrl.h>
 #include <dbghelp.h>
@@ -20,10 +21,7 @@
 
 namespace {
     void logStartupStep(const std::string& step) {
-        std::ofstream ofs("ghost_startup.log", std::ios::app);
-        if (ofs.is_open()) {
-            ofs << "[" << GetTickCount64() << " ms] " << step << std::endl;
-        }
+        NetworkLogger::logStartupStep(step);
     }
 
     std::string getModuleNameFromAddress(void* addr, uintptr_t& offset) {

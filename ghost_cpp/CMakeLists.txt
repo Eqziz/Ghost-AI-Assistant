@@ -23,6 +23,7 @@ set(SOURCES
     src/conversation.cpp
     src/capture_area.cpp
     src/screen_capture.cpp
+    src/proxy_utils.cpp
     src/vision_client.cpp
     src/keybinder.cpp
     src/ghost_ui.cpp
@@ -30,6 +31,7 @@ set(SOURCES
     src/activation_ui.cpp
     src/setup_ui.cpp
     src/ghost_assistant.cpp
+    src/network_logger.cpp
     src/main.cpp
 )
 
