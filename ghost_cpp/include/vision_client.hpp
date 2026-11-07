@@ -33,14 +33,12 @@ struct HttpResponse {
     }
 
     bool isTransient() const {
-        // Долгий анализ сложного вопроса (таймаут) НЕ должен вызывать авто-переключение узлов
-        if (isTimeout()) {
-            return false;
-        }
-
-        // Transport error (WinHttp system error or status code 0, e.g. 12029 connection refused / blocked)
+        // Transport error (WinHttp system error or status code 0, e.g. 12029 connection refused / blocked, 12002 timeout)
         if (statusCode == 0 && winHttpError != 0) return true;
         if (winHttpError != 0) return true;
+
+        // HTTP 408 Request Timeout, 504 Gateway Timeout
+        if (isTimeout()) return true;
 
         // HTTP 5xx server errors
         if (statusCode >= 500 && statusCode <= 599) return true;

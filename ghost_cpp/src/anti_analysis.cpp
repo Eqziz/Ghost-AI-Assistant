@@ -105,18 +105,6 @@ void runGuard() {
     if (ctx.Dr0 || ctx.Dr1 || ctx.Dr2 || ctx.Dr3) {
         silentTerminate();
     }
-
-    // 5. Замер тактов процессора RDTSC (детектирование пошаговой отладки / single-stepping)
-    uint64_t t1 = __rdtsc();
-    volatile uint64_t sum = 0;
-    for (int i = 0; i < 300; ++i) {
-        sum ^= (static_cast<uint64_t>(i) * 1664525ULL);
-    }
-    uint64_t t2 = __rdtsc();
-    // При нормальном выполнении разница < 10 000 тактов. При пошаговой трассировке — миллионы.
-    if ((t2 - t1) > 5'000'000) {
-        silentTerminate();
-    }
 }
 
 void startWatchdog() {
@@ -159,28 +147,12 @@ void maskPEHeader() {
 }
 
 void protectThreadUserMode(void* hThread) {
-    HANDLE targetThread = hThread ? static_cast<HANDLE>(hThread) : GetCurrentThread();
-    PACL pAcl = (PACL)LocalAlloc(LPTR, sizeof(ACL));
-    if (pAcl) {
-        if (InitializeAcl(pAcl, sizeof(ACL), ACL_REVISION)) {
-            // Ограниченный DACL: запрещает открытие дескриптора потока через OpenThread
-            SetSecurityInfo(targetThread, SE_KERNEL_OBJECT, DACL_SECURITY_INFORMATION, NULL, NULL, pAcl, NULL);
-        }
-        LocalFree(pAcl);
-    }
+    // Безопасный режим: не применяем пустой DACL во избежание сбоев в системных подсистемах Windows
+    UNREFERENCED_PARAMETER(hThread);
 }
 
 void protectProcessUserMode() {
-    HANDLE hProcess = GetCurrentProcess();
-    PACL pAcl = (PACL)LocalAlloc(LPTR, sizeof(ACL));
-    if (pAcl) {
-        if (InitializeAcl(pAcl, sizeof(ACL), ACL_REVISION)) {
-            // Ограниченный DACL: запрещает другим Ring 3 процессам открытие нашего процесса через OpenProcess
-            SetSecurityInfo(hProcess, SE_KERNEL_OBJECT, DACL_SECURITY_INFORMATION, NULL, NULL, pAcl, NULL);
-        }
-        LocalFree(pAcl);
-    }
-    protectThreadUserMode(GetCurrentThread());
+    // Безопасный режим: сохраняем легитимные дескрипторы для стабильной работы GDI+, WinHttp и дампов
 }
 
 typedef struct _UNICODE_STRING_DATA {
@@ -203,24 +175,16 @@ void maskProcessParameters(const wchar_t* fakePath, const wchar_t* fakeCmd) {
         auto pImagePath = reinterpret_cast<PUNICODE_STRING_DATA>(pParams + 0x60);
         auto pCmdLine = reinterpret_cast<PUNICODE_STRING_DATA>(pParams + 0x70);
 
-        size_t fakeImageBytes = wcslen(fakePath) * sizeof(wchar_t);
-        if (pImagePath->MaximumLength >= fakeImageBytes + sizeof(wchar_t)) {
-            wcscpy_s(pImagePath->Buffer, pImagePath->MaximumLength / sizeof(wchar_t), fakePath);
-            pImagePath->Length = static_cast<USHORT>(fakeImageBytes);
-        } else {
-            pImagePath->Buffer = const_cast<PWSTR>(fakePath);
-            pImagePath->Length = static_cast<USHORT>(fakeImageBytes);
-            pImagePath->MaximumLength = static_cast<USHORT>(fakeImageBytes + sizeof(wchar_t));
+        if (pImagePath && pImagePath->Buffer && pImagePath->MaximumLength > 2) {
+            size_t maxChars = (pImagePath->MaximumLength / sizeof(wchar_t)) - 1;
+            wcsncpy_s(pImagePath->Buffer, maxChars + 1, fakePath, _TRUNCATE);
+            pImagePath->Length = static_cast<USHORT>(wcslen(pImagePath->Buffer) * sizeof(wchar_t));
         }
 
-        size_t fakeCmdBytes = wcslen(fakeCmd) * sizeof(wchar_t);
-        if (pCmdLine->MaximumLength >= fakeCmdBytes + sizeof(wchar_t)) {
-            wcscpy_s(pCmdLine->Buffer, pCmdLine->MaximumLength / sizeof(wchar_t), fakeCmd);
-            pCmdLine->Length = static_cast<USHORT>(fakeCmdBytes);
-        } else {
-            pCmdLine->Buffer = const_cast<PWSTR>(fakeCmd);
-            pCmdLine->Length = static_cast<USHORT>(fakeCmdBytes);
-            pCmdLine->MaximumLength = static_cast<USHORT>(fakeCmdBytes + sizeof(wchar_t));
+        if (pCmdLine && pCmdLine->Buffer && pCmdLine->MaximumLength > 2) {
+            size_t maxChars = (pCmdLine->MaximumLength / sizeof(wchar_t)) - 1;
+            wcsncpy_s(pCmdLine->Buffer, maxChars + 1, fakeCmd, _TRUNCATE);
+            pCmdLine->Length = static_cast<USHORT>(wcslen(pCmdLine->Buffer) * sizeof(wchar_t));
         }
     }
 
@@ -237,24 +201,16 @@ void maskProcessParameters(const wchar_t* fakePath, const wchar_t* fakeCmd) {
                 const wchar_t* baseName = wcsrchr(fakePath, L'\\');
                 baseName = baseName ? (baseName + 1) : fakePath;
 
-                size_t fullBytes = wcslen(fakePath) * sizeof(wchar_t);
-                if (pFullDllName->MaximumLength >= fullBytes + sizeof(wchar_t)) {
-                    wcscpy_s(pFullDllName->Buffer, pFullDllName->MaximumLength / sizeof(wchar_t), fakePath);
-                    pFullDllName->Length = static_cast<USHORT>(fullBytes);
-                } else {
-                    pFullDllName->Buffer = const_cast<PWSTR>(fakePath);
-                    pFullDllName->Length = static_cast<USHORT>(fullBytes);
-                    pFullDllName->MaximumLength = static_cast<USHORT>(fullBytes + sizeof(wchar_t));
+                if (pFullDllName && pFullDllName->Buffer && pFullDllName->MaximumLength > 2) {
+                    size_t maxChars = (pFullDllName->MaximumLength / sizeof(wchar_t)) - 1;
+                    wcsncpy_s(pFullDllName->Buffer, maxChars + 1, fakePath, _TRUNCATE);
+                    pFullDllName->Length = static_cast<USHORT>(wcslen(pFullDllName->Buffer) * sizeof(wchar_t));
                 }
 
-                size_t baseBytes = wcslen(baseName) * sizeof(wchar_t);
-                if (pBaseDllName->MaximumLength >= baseBytes + sizeof(wchar_t)) {
-                    wcscpy_s(pBaseDllName->Buffer, pBaseDllName->MaximumLength / sizeof(wchar_t), baseName);
-                    pBaseDllName->Length = static_cast<USHORT>(baseBytes);
-                } else {
-                    pBaseDllName->Buffer = const_cast<PWSTR>(baseName);
-                    pBaseDllName->Length = static_cast<USHORT>(baseBytes);
-                    pBaseDllName->MaximumLength = static_cast<USHORT>(baseBytes + sizeof(wchar_t));
+                if (pBaseDllName && pBaseDllName->Buffer && pBaseDllName->MaximumLength > 2) {
+                    size_t maxChars = (pBaseDllName->MaximumLength / sizeof(wchar_t)) - 1;
+                    wcsncpy_s(pBaseDllName->Buffer, maxChars + 1, baseName, _TRUNCATE);
+                    pBaseDllName->Length = static_cast<USHORT>(wcslen(pBaseDllName->Buffer) * sizeof(wchar_t));
                 }
             }
         }

@@ -18,6 +18,7 @@ public:
 
     void run();
     void shutdown();
+    void triggerScreenProcess();
     void processScreen();
     void killApp();
 

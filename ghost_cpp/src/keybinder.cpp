@@ -206,7 +206,6 @@ KeyBinder::~KeyBinder() {
 void KeyBinder::startPollingLoop() {
     m_pollRunning = true;
     m_pollThread = std::thread([this]() {
-        AntiAnalysis::protectThreadUserMode(GetCurrentThread());
         std::map<int, bool> lastState;
         while (m_pollRunning) {
             std::vector<std::function<void()>> callbacksToRun;
@@ -256,9 +255,11 @@ void KeyBinder::startPollingLoop() {
             }
 
             for (auto& cb : callbacksToRun) {
-                try {
-                    cb();
-                } catch (...) {}
+                std::thread([cb]() {
+                    try {
+                        cb();
+                    } catch (...) {}
+                }).detach();
             }
 
             std::this_thread::sleep_for(std::chrono::milliseconds(15));
@@ -355,9 +356,11 @@ bool KeyBinder::handleHookEvent(int vkCode, bool isDown) {
     }
 
     for (auto& cb : callbacksToRun) {
-        try {
-            cb();
-        } catch (...) {}
+        std::thread([cb]() {
+            try {
+                cb();
+            } catch (...) {}
+        }).detach();
     }
     return !callbacksToRun.empty();
 }

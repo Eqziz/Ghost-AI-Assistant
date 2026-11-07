@@ -77,10 +77,7 @@ void GhostAssistant::setupHotkeys() {
     } else {
         // Light mode
         m_binder->registerHotkey("screenshot", m_config.hotkeys["screenshot"], [this]() {
-            if (m_workerThread.joinable()) {
-                m_workerThread.join();
-            }
-            m_workerThread = std::thread(&GhostAssistant::processScreen, this);
+            triggerScreenProcess();
         });
 
         m_binder->registerHotkey("toggle_follow", m_config.hotkeys["toggle_follow"], [this]() {
@@ -144,10 +141,7 @@ void GhostAssistant::startHardwarePolling() {
 
         while (m_running) {
             if (GetAsyncKeyState(VK_F2_KEY) & 0x8000) {
-                if (m_workerThread.joinable()) {
-                    m_workerThread.join();
-                }
-                m_workerThread = std::thread(&GhostAssistant::processScreen, this);
+                triggerScreenProcess();
                 while ((GetAsyncKeyState(VK_F2_KEY) & 0x8000) && m_running) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 }
@@ -174,6 +168,17 @@ void GhostAssistant::startPositionLoop() {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     });
+}
+
+void GhostAssistant::triggerScreenProcess() {
+    if (!m_running) return;
+    if (m_isProcessing.load()) {
+        return;
+    }
+    if (m_workerThread.joinable()) {
+        m_workerThread.join();
+    }
+    m_workerThread = std::thread(&GhostAssistant::processScreen, this);
 }
 
 void GhostAssistant::processScreen() {
@@ -210,6 +215,12 @@ void GhostAssistant::processScreen() {
             int x, y, w, h;
             m_ui->getGeometry(x, y, w, h);
             imageB64 = ScreenCapture::captureToBase64Jpeg(x, y, w + m_config.screenshot_offset, h + m_config.screenshot_offset, 85);
+        }
+
+        if (imageB64.empty()) {
+            m_ui->log("[Ошибка: не удалось захватить экран]");
+            m_ui->setState(WindowState::ERROR_STATE);
+            return;
         }
 
         std::string answer = m_client->analyze(imageB64);

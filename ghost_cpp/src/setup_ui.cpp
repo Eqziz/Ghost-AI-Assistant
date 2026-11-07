@@ -62,6 +62,7 @@ namespace {
         ID_EDIT_HK_RESET_CONTEXT = IDC_EDIT_HK_RESET_CONTEXT,
         ID_BTN_SAVE_START = IDC_BTN_SAVE_START,
         ID_BTN_CANCEL = IDC_BTN_CANCEL,
+        ID_BTN_MINIMIZE = IDC_BTN_MINIMIZE,
         // Cascade Fallback & Proxy
         ID_EDIT_FALLBACK_URL = IDC_EDIT_FALLBACK_URL,
         ID_EDIT_FALLBACK_KEY = IDC_EDIT_FALLBACK_KEY,
@@ -474,6 +475,11 @@ namespace {
             SendMessage(lblSecurityTip, WM_SETFONT, (WPARAM)s_fontNormal, TRUE);
 
             // --- Кнопки снизу ---
+            HWND btnMinimize = CreateWindowW(L"BUTTON", L"🗕 Свернуть",
+                                             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
+                                             595, 645, 110, 35, hwnd, (HMENU)ID_BTN_MINIMIZE, hInst, NULL);
+            SendMessage(btnMinimize, WM_SETFONT, (WPARAM)s_fontNormal, TRUE);
+
             HWND btnCancel = CreateWindowW(L"BUTTON", L"Отмена",
                                            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
                                            715, 645, 110, 35, hwnd, (HMENU)ID_BTN_CANCEL, hInst, NULL);
@@ -579,6 +585,8 @@ namespace {
                 cfg.save();
                 s_resultConfig = cfg;
                 DestroyWindow(hwnd);
+            } else if (id == ID_BTN_MINIMIZE) {
+                ShowWindow(hwnd, SW_MINIMIZE);
             } else if (id == ID_BTN_CANCEL) {
                 DestroyWindow(hwnd);
             }
@@ -622,10 +630,10 @@ std::optional<AppConfig> SetupUI::showSetupDialog(const AppConfig& initialConfig
     int posY = (std::max)(0, (screenH - winH) / 2);
 
     HWND hwnd = CreateWindowExW(
-        WS_EX_DLGMODALFRAME,
+        WS_EX_APPWINDOW,
         className.c_str(),
         L"Ghost-AI — Setup",
-        WS_POPUP | WS_CAPTION | WS_SYSMENU,
+        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
         posX, posY, winW, winH,
         NULL, NULL, hInstance, NULL
     );

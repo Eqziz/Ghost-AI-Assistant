@@ -197,9 +197,13 @@ HttpResponse VisionClient::executeHttpRequest(
     DWORD protocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
     WinHttpSetOption(hSession, WINHTTP_OPTION_SECURE_PROTOCOLS, &protocols, sizeof(protocols));
 
-    int timeoutMs = timeoutSec * 1000;
-    DWORD connectTimeout = (std::min)(10000, timeoutMs);
-    WinHttpSetTimeouts(hSession, connectTimeout, connectTimeout, timeoutMs, timeoutMs);
+    // Таймауты: подключение и отправка имеют разумные лимиты (15с/60с),
+    // а таймаут ожидания ответа нейросети (receiveTimeout) полностью отключен (0 = INFINITE),
+    // чтобы модель могла генерировать ответ любой сложности без прерывания.
+    DWORD connectTimeout = (timeoutSec > 0) ? (std::min)(15000, timeoutSec * 1000) : 15000;
+    DWORD sendTimeout = (timeoutSec > 0) ? (std::max)(60000, timeoutSec * 1000) : 60000;
+    DWORD receiveTimeout = 0; // 0 = INFINITE в WinHttp API (отключен таймаут ожидания)
+    WinHttpSetTimeouts(hSession, connectTimeout, connectTimeout, sendTimeout, receiveTimeout);
 
     // 3. Connect to Target Host
     WinHttpHandle hConnect = WinHttpConnect(hSession, hostName.c_str(), port, 0);
@@ -453,6 +457,7 @@ nlohmann::json VisionClient::buildOpenAIPayload(
     payload[_XC("model")] = model;
     payload[_XC("messages")] = messages;
     payload[_XC("max_tokens")] = maxTokens;
+    payload[_XC("reasoning")] = { { _XC("max_tokens"), 0 } };
     return payload;
 }
 
@@ -496,25 +501,48 @@ std::string VisionClient::parseOpenAIResponse(const std::string& jsonStr) {
     std::string answer;
     try {
         const auto& choice = j[_XC("choices")][0];
-        if (!choice.contains(_XC("message")) || !choice[_XC("message")].contains(_XC("content"))) {
-            throw std::runtime_error("OpenAI response missing 'message.content'");
+        if (!choice.contains(_XC("message"))) {
+            throw std::runtime_error("OpenAI response missing 'message'");
         }
-        const auto& content = choice[_XC("message")][_XC("content")];
-        if (content.is_string()) {
-            answer = content.get<std::string>();
-        } else if (content.is_array()) {
-            for (const auto& part : content) {
-                if (part.is_object() && part.value(_XC("type"), "") == _X("text")) {
-                    answer += part.value(_XC("text"), "") + " ";
-                } else if (part.is_string()) {
-                    answer += part.get<std::string>() + " ";
+        const auto& msg = choice[_XC("message")];
+        if (msg.contains(_XC("content"))) {
+            const auto& content = msg[_XC("content")];
+            if (content.is_string()) {
+                answer = content.get<std::string>();
+            } else if (content.is_array()) {
+                for (const auto& part : content) {
+                    if (part.is_object() && part.value(_XC("type"), "") == _X("text")) {
+                        answer += part.value(_XC("text"), "") + " ";
+                    } else if (part.is_string()) {
+                        answer += part.get<std::string>() + " ";
+                    }
                 }
+            }
+        }
+        if (answer.empty() && msg.contains(_XC("reasoning")) && msg[_XC("reasoning")].is_string()) {
+            std::string r = msg[_XC("reasoning")].get<std::string>();
+            while (!r.empty() && (r.back() == '\n' || r.back() == '\r' || r.back() == ' ')) r.pop_back();
+            size_t lastNl = r.find_last_of("\n\r");
+            if (lastNl != std::string::npos && lastNl + 1 < r.length()) {
+                answer = r.substr(lastNl + 1);
+            } else {
+                answer = r.substr(0, 50);
             }
         }
     } catch (const std::runtime_error&) {
         throw;
     } catch (const std::exception& e) {
         throw std::runtime_error(std::string("OpenAI parse error: ") + e.what());
+    }
+
+    // Strip <think>...</think> tags if model outputs raw internal monologue
+    size_t thinkStart = answer.find("<think>");
+    size_t thinkEnd = answer.find("</think>");
+    if (thinkStart != std::string::npos && thinkEnd != std::string::npos && thinkEnd > thinkStart) {
+        std::string stripped = answer.substr(thinkEnd + 8);
+        if (!stripped.empty()) {
+            answer = stripped;
+        }
     }
 
     // Trim

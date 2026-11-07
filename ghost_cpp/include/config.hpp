@@ -72,7 +72,7 @@ struct AppConfig {
     double alpha_default = 0.5;
     int screenshot_offset = 50;
     int capture_step = 25;
-    int request_timeout = 120;
+    int request_timeout = 0;
     double window_alpha = 0.5;
 
     nlohmann::json toJson() const;

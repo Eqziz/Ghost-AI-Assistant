@@ -38,6 +38,7 @@ enum {
     IDC_EDIT_HK_RESET_CONTEXT,
     IDC_BTN_SAVE_START,
     IDC_BTN_CANCEL,
+    IDC_BTN_MINIMIZE,
     // Resilient Network: Cascade Fallback & Proxy
     IDC_EDIT_FALLBACK_URL = 1050,
     IDC_FALLBACK_URL = 1050,

@@ -18,6 +18,7 @@
 
 namespace {
     const UINT_PTR TIMER_HARD_AUTO_HIDE = 1001;
+    const UINT WM_APP_TRIGGER_AUTO_HIDE = WM_APP + 101;
 
     std::wstring generateUniqueClassName(const std::wstring& prefix = L"SysHost_") {
         uint8_t randBytes[8] = { 0 };
@@ -141,8 +142,8 @@ void GhostUI::showHardResponse(const std::string& text, double durationSec) {
     log(text);
     setState(WindowState::IDLE);
 
-    // Запускаем таймер автоскрытия
-    SetTimer(m_hwnd, TIMER_HARD_AUTO_HIDE, (UINT)(durationSec * 1000), NULL);
+    // Запускаем таймер автоскрытия в потоке очереди сообщений UI
+    PostMessage(m_hwnd, WM_APP_TRIGGER_AUTO_HIDE, static_cast<WPARAM>(durationSec * 1000), 0);
 }
 
 void GhostUI::setState(WindowState state) {
@@ -338,6 +339,14 @@ LRESULT CALLBACK GhostUI::WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
             KillTimer(hwnd, TIMER_HARD_AUTO_HIDE);
             self->setInvisible(true);
             self->setStealth(false);
+        }
+        return 0;
+    }
+
+    case WM_APP_TRIGGER_AUTO_HIDE: {
+        if (self) {
+            KillTimer(hwnd, TIMER_HARD_AUTO_HIDE);
+            SetTimer(hwnd, TIMER_HARD_AUTO_HIDE, static_cast<UINT>(wParam), NULL);
         }
         return 0;
     }
