@@ -212,9 +212,9 @@ namespace {
                                         35, 66, 190, 20, hwnd, (HMENU)ID_RADIO_OLLAMA, hInst, NULL);
             SendMessage(s_rdoOllama, WM_SETFONT, (WPARAM)s_fontNormal, TRUE);
 
-            s_rdoOpenRouter = CreateWindowW(L"BUTTON", L"☁️ OpenRouter (облако)",
+            s_rdoOpenRouter = CreateWindowW(L"BUTTON", L"☁️ Облако (OpenRouter / Gemini)",
                                             WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_TABSTOP,
-                                            235, 66, 200, 20, hwnd, (HMENU)ID_RADIO_OPENROUTER, hInst, NULL);
+                                            235, 66, 235, 20, hwnd, (HMENU)ID_RADIO_OPENROUTER, hInst, NULL);
             SendMessage(s_rdoOpenRouter, WM_SETFONT, (WPARAM)s_fontNormal, TRUE);
 
             // Ollama URL & Model
@@ -230,29 +230,28 @@ namespace {
                                             150, 114, 325, 22, hwnd, (HMENU)ID_EDIT_OLLAMA_MODEL, hInst, NULL);
             SendMessage(s_edOllamaModel, WM_SETFONT, (WPARAM)s_fontNormal, TRUE);
 
-            // OpenRouter Key & Model
-            CreateWindowW(L"STATIC", L"OpenRouter Key:", WS_CHILD | WS_VISIBLE, 35, 141, 110, 20, hwnd, NULL, hInst, NULL);
+            // OpenRouter / Gemini Key & Model
+            CreateWindowW(L"STATIC", L"API Key (OR/Gemini):", WS_CHILD | WS_VISIBLE, 35, 141, 115, 20, hwnd, NULL, hInst, NULL);
             s_edOpenRouterKey = CreateWindowW(L"EDIT", toWide(s_currentConfig.openrouter_api_key).c_str(),
                                               WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_PASSWORD | WS_TABSTOP,
                                               150, 139, 325, 22, hwnd, (HMENU)ID_EDIT_OPENROUTER_KEY, hInst, NULL);
             SendMessage(s_edOpenRouterKey, WM_SETFONT, (WPARAM)s_fontNormal, TRUE);
 
-            CreateWindowW(L"STATIC", L"OpenRouter Model:", WS_CHILD | WS_VISIBLE, 35, 166, 115, 20, hwnd, NULL, hInst, NULL);
+            CreateWindowW(L"STATIC", L"Model (OR/Gemini):", WS_CHILD | WS_VISIBLE, 35, 166, 115, 20, hwnd, NULL, hInst, NULL);
             s_edOpenRouterModel = CreateWindowW(L"COMBOBOX", L"",
                                                 WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_TABSTOP,
                                                 150, 164, 325, 220, hwnd, (HMENU)ID_EDIT_OPENROUTER_MODEL, hInst, NULL);
             SendMessage(s_edOpenRouterModel, WM_SETFONT, (WPARAM)s_fontNormal, TRUE);
 
             const wchar_t* PRESET_MODELS[] = {
+                L"gemini-2.5-flash",
+                L"gemini-3.5-flash-lite",
+                L"gemini-flash-latest",
                 L"nvidia/nemotron-3.5-super-vl:free",
-                L"google/gemini-2.0-flash-001",
+                L"meta-llama/llama-3.2-11b-vision-instruct:free",
+                L"google/gemma-4-26b-a4b-it:free",
                 L"anthropic/claude-3.5-sonnet",
-                L"anthropic/claude-3.5-haiku",
-                L"openai/gpt-4o",
-                L"openai/gpt-4o-mini",
-                L"qwen/qwen-2.5-vl-72b-instruct",
-                L"deepseek/deepseek-chat",
-                L"meta-llama/llama-3.2-90b-vision-instruct"
+                L"openai/gpt-4o-mini"
             };
             for (const auto* m : PRESET_MODELS) {
                 SendMessageW(s_edOpenRouterModel, CB_ADDSTRING, 0, (LPARAM)m);

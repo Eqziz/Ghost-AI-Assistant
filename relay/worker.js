@@ -71,7 +71,8 @@ export default {
     try {
       const clientAuth = request.headers.get("Authorization");
       const clientKey = clientAuth ? clientAuth.replace(/^Bearer\s+/i, "").trim() : "";
-      const customGeminiKey = request.headers.get("x-gemini-key") || env.GEMINI_API_KEY || "";
+      const isGeminiClientKey = Boolean(clientKey && !clientKey.startsWith("sk-"));
+      const customGeminiKey = request.headers.get("x-gemini-key") || (isGeminiClientKey ? clientKey : "") || env.GEMINI_API_KEY || "";
       const openRouterKey = env.OPENROUTER_API_KEY || (clientKey.startsWith("sk-or-") ? clientKey : "");
 
       let requestData;
@@ -208,7 +209,43 @@ async function fetchOpenRouter(payload, apiKey, timeoutMs = 90000) {
 }
 
 async function tryGoogleGemini(openAiPayload, geminiApiKey) {
-  const model = "gemini-2.0-flash";
+  let model = "gemini-2.5-flash";
+  if (openAiPayload.model && typeof openAiPayload.model === "string") {
+    const m = openAiPayload.model.replace(/^google\//, "");
+    if (m.includes("gemini")) {
+      model = m;
+    }
+  }
+
+  // 1. Прямой вызов официального OpenAI-совместимого эндпоинта Google Gemini
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  try {
+    const payload = {
+      ...openAiPayload,
+      model: model,
+    };
+    const res = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${geminiApiKey}`
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const normalized = normalizeOpenAIResponse(data);
+      if (normalized) return normalized;
+    }
+  } catch (openaiErr) {
+    // При ошибке переходим к запасному методу generateContent ниже
+  } finally {
+    clearTimeout(timer);
+  }
+
+  // 2. Запасной нативный эндпоинт generateContent
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
 
   const contents = [];
@@ -249,14 +286,14 @@ async function tryGoogleGemini(openAiPayload, geminiApiKey) {
     geminiBody.systemInstruction = { parts: [{ text: systemText.trim() }] };
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 90000);
+  const controller2 = new AbortController();
+  const timer2 = setTimeout(() => controller2.abort(), 60000);
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(geminiBody),
-      signal: controller.signal,
+      signal: controller2.signal,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -272,7 +309,7 @@ async function tryGoogleGemini(openAiPayload, geminiApiKey) {
       usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
     };
   } finally {
-    clearTimeout(timer);
+    clearTimeout(timer2);
   }
 }
 

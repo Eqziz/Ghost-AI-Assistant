@@ -642,9 +642,26 @@ std::string VisionClient::analyzeOpenRouter(const std::string& imageBase64, cons
         std::lock_guard<std::mutex> lock(m_clientMutex);
         cfg = m_config;
     }
-    std::string url = _X("https://openrouter.ai/api/v1/chat/completions");
-    std::string authHeader = _X("Authorization: Bearer ") + cfg.openrouter_api_key;
-    std::string model = !cfg.openrouter_model.empty() ? cfg.openrouter_model : "meta-llama/llama-3.2-11b-vision-instruct:free";
+    bool isGeminiKey = !cfg.openrouter_api_key.empty() && (cfg.openrouter_api_key.rfind("sk-", 0) != 0);
+    bool isOpenAiKey = !cfg.openrouter_api_key.empty() && (cfg.openrouter_api_key.rfind("sk-or-", 0) != 0) && (cfg.openrouter_api_key.rfind("sk-", 0) == 0);
+
+    std::string url = isGeminiKey
+        ? _X("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")
+        : (isOpenAiKey ? _X("https://api.openai.com/v1/chat/completions")
+                       : _X("https://openrouter.ai/api/v1/chat/completions"));
+    std::string authHeader = !cfg.openrouter_api_key.empty() ? (_X("Authorization: Bearer ") + cfg.openrouter_api_key) : "";
+
+    std::string model = cfg.openrouter_model;
+    if (isGeminiKey) {
+        if (model.rfind("google/", 0) == 0) model = model.substr(7);
+        if (model.empty() || model.find("gemini") == std::string::npos) {
+            model = "gemini-2.5-flash";
+        }
+    } else if (model.empty()) {
+        model = isOpenAiKey ? "gpt-4o-mini" : "nvidia/nemotron-3.5-super-vl:free";
+    }
+
+    std::string endpointName = isGeminiKey ? "Google Gemini Flash API" : (isOpenAiKey ? "Direct OpenAI API" : "Primary Cloud (OpenRouter)");
 
     std::vector<ConversationTurn> history;
     if (m_pMemory && m_pMemory->isEnabled()) {
@@ -653,9 +670,9 @@ std::string VisionClient::analyzeOpenRouter(const std::string& imageBase64, cons
 
     nlohmann::json payload = buildOpenAIPayload(prompt, imageBase64, model, cfg.system_prompt, history, 500);
 
-    HttpResponse resp = executeHttpRequest(url, payload.dump(), authHeader, cfg.request_timeout, 1, "Primary Cloud");
+    HttpResponse resp = executeHttpRequest(url, payload.dump(), authHeader, cfg.request_timeout, 1, endpointName);
     if (!resp.isSuccess()) {
-        throw std::runtime_error("OpenRouter API: " + resp.getReasonString());
+        throw std::runtime_error(endpointName + ": " + resp.getReasonString());
     }
     return parseOpenAIResponse(resp.body);
 }
@@ -678,31 +695,53 @@ std::string VisionClient::executeCascade(const std::string& imageBase64, const s
     }
 
     // =========================================================================
-    // Tier 1: Primary Cloud API (OpenRouter / OpenAI)
+    // Tier 1: Primary Cloud API (Google Gemini / OpenAI / OpenRouter)
     // =========================================================================
-    std::string tier1Url = _X("https://openrouter.ai/api/v1/chat/completions");
-    std::string tier1Auth = !cfg.openrouter_api_key.empty() ? (_X("Authorization: Bearer ") + cfg.openrouter_api_key) : "";
-    std::string tier1Model = !cfg.openrouter_model.empty() ? cfg.openrouter_model : "nvidia/nemotron-3.5-super-vl:free";
+    bool isGeminiKey = !cfg.openrouter_api_key.empty() && (cfg.openrouter_api_key.rfind("sk-", 0) != 0);
+    bool isOpenAiKey = !cfg.openrouter_api_key.empty() && (cfg.openrouter_api_key.rfind("sk-or-", 0) != 0) && (cfg.openrouter_api_key.rfind("sk-", 0) == 0);
 
+    std::string tier1Url = isGeminiKey
+        ? _X("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")
+        : (isOpenAiKey ? _X("https://api.openai.com/v1/chat/completions")
+                       : _X("https://openrouter.ai/api/v1/chat/completions"));
+    std::string tier1Auth = !cfg.openrouter_api_key.empty() ? (_X("Authorization: Bearer ") + cfg.openrouter_api_key) : "";
+
+    std::string tier1Model = cfg.openrouter_model;
+    if (isGeminiKey) {
+        if (tier1Model.rfind("google/", 0) == 0) tier1Model = tier1Model.substr(7);
+        if (tier1Model.empty() || tier1Model.find("gemini") == std::string::npos) {
+            tier1Model = "gemini-2.5-flash";
+        }
+    } else if (tier1Model.empty()) {
+        tier1Model = isOpenAiKey ? "gpt-4o-mini" : "nvidia/nemotron-3.5-super-vl:free";
+    }
+
+    std::string tier1EndpointName = isGeminiKey ? "Google Gemini Flash API" : (isOpenAiKey ? "Direct OpenAI API" : "Primary Cloud (OpenRouter)");
     nlohmann::json tier1Payload = buildOpenAIPayload(prompt, imageBase64, tier1Model, cfg.system_prompt, history, 500);
 
     bool shouldSkipTier1 = cfg.openrouter_api_key.empty() && !cfg.fallback_url.empty();
     HttpResponse resp1;
 
+    // Determine Tier 2 availability beforehand for failover decisions
+    bool hasTier2 = !cfg.fallback_url.empty() && !isSameUrl(cfg.fallback_url, tier1Url);
+
     if (!shouldSkipTier1) {
-        resp1 = executeHttpRequest(tier1Url, tier1Payload.dump(), tier1Auth, cfg.request_timeout, 1, "Primary Cloud");
+        resp1 = executeHttpRequest(tier1Url, tier1Payload.dump(), tier1Auth, cfg.request_timeout, 1, tier1EndpointName);
         if (resp1.isSuccess()) {
             try {
                 return parseOpenAIResponse(resp1.body);
             } catch (const std::exception& e) {
-                NetworkLogger::logError(1, "Primary Cloud", 0, 200, std::string("Payload parse error: ") + e.what());
+                NetworkLogger::logError(1, tier1EndpointName, 0, 200, std::string("Payload parse error: ") + e.what());
                 lastErrorReason = std::string("Payload parse error: ") + e.what();
             }
         } else {
             lastErrorReason = resp1.getReasonString();
             if (!resp1.isTransient()) {
-                // Non-transient client error (400, 401, 403, 404): abort immediately
-                throw std::runtime_error("Tier 1 Cloud Client Error: " + resp1.getReasonString() + " - " + resp1.body.substr(0, 200));
+                if (!hasTier2 && !cfg.enable_local_fallback) {
+                    // Non-transient client error (400, 401, 403, 404) and no fallbacks available: abort immediately
+                    throw std::runtime_error("Tier 1 Cloud Client Error: " + resp1.getReasonString() + " - " + resp1.body.substr(0, 200));
+                }
+                NetworkLogger::log("Tier 1 client error (" + resp1.getReasonString() + "), attempting failover to secondary tiers");
             }
         }
     } else {
@@ -712,8 +751,6 @@ std::string VisionClient::executeCascade(const std::string& imageBase64, const s
     // =========================================================================
     // Failover Transition (Tier 1 -> Tier 2 or Tier 3)
     // =========================================================================
-    bool hasTier2 = !cfg.fallback_url.empty() && !isSameUrl(cfg.fallback_url, tier1Url);
-
     if (hasTier2) {
         NetworkLogger::logTransition(1, 2, lastErrorReason);
         reportStatus("Подключение к резервному серверу...");
@@ -724,7 +761,7 @@ std::string VisionClient::executeCascade(const std::string& imageBase64, const s
         std::string tier2Url = cfg.fallback_url;
         std::string tier2Key = !cfg.fallback_api_key.empty() ? cfg.fallback_api_key : cfg.openrouter_api_key;
         std::string tier2Auth = !tier2Key.empty() ? (_X("Authorization: Bearer ") + tier2Key) : "";
-        std::string tier2Model = !cfg.fallback_model.empty() ? cfg.fallback_model : tier1Model;
+        std::string tier2Model = !cfg.fallback_model.empty() ? cfg.fallback_model : (isGeminiKey ? "gemini-2.5-flash" : tier1Model);
 
         nlohmann::json tier2Payload = buildOpenAIPayload(prompt, imageBase64, tier2Model, cfg.system_prompt, history, 500);
 
