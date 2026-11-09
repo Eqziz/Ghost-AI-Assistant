@@ -1,0 +1,4 @@
+#include "resource.h"
+
+// Primary Application Icon (Lowest resource ID becomes default exe icon in Windows)
+IDI_APP_ICON ICON "icon.ico"

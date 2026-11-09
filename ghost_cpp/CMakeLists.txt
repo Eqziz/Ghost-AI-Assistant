@@ -32,6 +32,7 @@ set(SOURCES
     src/ghost_assistant.cpp
     src/network_logger.cpp
     src/main.cpp
+    ghost_ai.rc
 )
 
 add_executable(GhostAI WIN32 ${SOURCES})

@@ -1,4 +1,5 @@
 #include "setup_ui.hpp"
+#include "resource.h"
 #include <windows.h>
 #include <commctrl.h>
 #include <string>
@@ -613,10 +614,16 @@ std::optional<AppConfig> SetupUI::showSetupDialog(const AppConfig& initialConfig
     HINSTANCE hInstance = GetModuleHandle(NULL);
     std::wstring className = generateUniqueClassName(L"SysCfg_");
 
+    HICON hAppIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_APP_ICON));
+    HICON hAppIconSm = (HICON)LoadImageW(hInstance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
+                                         GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+
     WNDCLASSEXW wc = { 0 };
     wc.cbSize = sizeof(WNDCLASSEXW);
     wc.lpfnWndProc = SetupWndProc;
     wc.hInstance = hInstance;
+    wc.hIcon = hAppIcon;
+    wc.hIconSm = hAppIconSm;
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.lpszClassName = className.c_str();
     wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
@@ -637,6 +644,9 @@ std::optional<AppConfig> SetupUI::showSetupDialog(const AppConfig& initialConfig
         posX, posY, winW, winH,
         NULL, NULL, hInstance, NULL
     );
+
+    if (hAppIcon) SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM)hAppIcon);
+    if (hAppIconSm) SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hAppIconSm);
 
     ShowWindow(hwnd, SW_SHOW);
     UpdateWindow(hwnd);

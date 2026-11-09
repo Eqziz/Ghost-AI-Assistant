@@ -1,4 +1,4 @@
-# GhostAI — Native Windows Assistive AI Visual Overlay
+# <img src="icon.ico" width="32" height="32" alt="GhostAI Icon" valign="middle"> GhostAI — Native Windows Assistive AI Visual Overlay
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20x64-blue)
 ![Language](https://img.shields.io/badge/Language-C%2B%2B17%20%2F%20Python%203.11-brightgreen)
