@@ -225,6 +225,7 @@ async function tryGoogleGemini(openAiPayload, geminiApiKey) {
       ...openAiPayload,
       model: model,
     };
+    delete payload.reasoning;
     const res = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
       headers: {

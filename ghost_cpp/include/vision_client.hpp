@@ -73,7 +73,8 @@ public:
         const std::string& model,
         const std::string& systemPrompt = "",
         const std::vector<ConversationTurn>& history = {},
-        int maxTokens = 500
+        int maxTokens = 500,
+        bool includeReasoningZero = true
     );
 
     static nlohmann::json buildOllamaPayload(

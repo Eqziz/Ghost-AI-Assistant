@@ -422,7 +422,8 @@ nlohmann::json VisionClient::buildOpenAIPayload(
     const std::string& model,
     const std::string& systemPrompt,
     const std::vector<ConversationTurn>& history,
-    int maxTokens
+    int maxTokens,
+    bool includeReasoningZero
 ) {
     nlohmann::json messages = nlohmann::json::array();
 
@@ -457,7 +458,9 @@ nlohmann::json VisionClient::buildOpenAIPayload(
     payload[_XC("model")] = model;
     payload[_XC("messages")] = messages;
     payload[_XC("max_tokens")] = maxTokens;
-    payload[_XC("reasoning")] = { { _XC("max_tokens"), 0 } };
+    if (includeReasoningZero && model.find("gemini") == std::string::npos) {
+        payload[_XC("reasoning")] = { { _XC("max_tokens"), 0 } };
+    }
     return payload;
 }
 
@@ -668,7 +671,7 @@ std::string VisionClient::analyzeOpenRouter(const std::string& imageBase64, cons
         history = m_pMemory->getTurns(cfg.include_images_in_context);
     }
 
-    nlohmann::json payload = buildOpenAIPayload(prompt, imageBase64, model, cfg.system_prompt, history, 500);
+    nlohmann::json payload = buildOpenAIPayload(prompt, imageBase64, model, cfg.system_prompt, history, 500, !isGeminiKey);
 
     HttpResponse resp = executeHttpRequest(url, payload.dump(), authHeader, cfg.request_timeout, 1, endpointName);
     if (!resp.isSuccess()) {
@@ -717,7 +720,7 @@ std::string VisionClient::executeCascade(const std::string& imageBase64, const s
     }
 
     std::string tier1EndpointName = isGeminiKey ? "Google Gemini Flash API" : (isOpenAiKey ? "Direct OpenAI API" : "Primary Cloud (OpenRouter)");
-    nlohmann::json tier1Payload = buildOpenAIPayload(prompt, imageBase64, tier1Model, cfg.system_prompt, history, 500);
+    nlohmann::json tier1Payload = buildOpenAIPayload(prompt, imageBase64, tier1Model, cfg.system_prompt, history, 500, !isGeminiKey);
 
     bool shouldSkipTier1 = cfg.openrouter_api_key.empty() && !cfg.fallback_url.empty();
     HttpResponse resp1;
@@ -763,7 +766,7 @@ std::string VisionClient::executeCascade(const std::string& imageBase64, const s
         std::string tier2Auth = !tier2Key.empty() ? (_X("Authorization: Bearer ") + tier2Key) : "";
         std::string tier2Model = !cfg.fallback_model.empty() ? cfg.fallback_model : (isGeminiKey ? "gemini-2.5-flash" : tier1Model);
 
-        nlohmann::json tier2Payload = buildOpenAIPayload(prompt, imageBase64, tier2Model, cfg.system_prompt, history, 500);
+        nlohmann::json tier2Payload = buildOpenAIPayload(prompt, imageBase64, tier2Model, cfg.system_prompt, history, 500, !isGeminiKey);
 
         HttpResponse resp2 = executeHttpRequest(tier2Url, tier2Payload.dump(), tier2Auth, cfg.request_timeout, 2, "Backup VPS Relay");
         if (resp2.isSuccess()) {
